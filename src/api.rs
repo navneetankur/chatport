@@ -83,7 +83,9 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         created_at: now,
         updated_at: now,
         model: r.model.unwrap_or_else(|| s.config.default_model.clone()),
-        provider: r.provider.or_else(|| s.config.default_provider.clone()),
+        provider: Some(with_data_collection_default(
+            r.provider.or_else(|| s.config.default_provider.clone()),
+        )),
         system: r.system,
         cache: r.cache.unwrap_or_default(),
         reasoning_effort: None,
@@ -91,6 +93,16 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
     };
     s.store.put_meta(&meta)?;
     Ok(Json(meta))
+}
+
+/// New conversations opt out of providers that log/train on prompts, unless
+/// the request or config sets `data_collection` explicitly.
+fn with_data_collection_default(provider: Option<Value>) -> Value {
+    let mut p = provider.unwrap_or_else(|| json!({}));
+    if let Some(obj) = p.as_object_mut() {
+        obj.entry("data_collection").or_insert(json!("deny"));
+    }
+    return p;
 }
 
 const DEFAULT_TITLE: &str = "New chat";
@@ -441,6 +453,22 @@ fn save_reply(s: &AppState, conv_id: &str, asst: &Message) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_collection_defaults_to_deny() {
+        assert_eq!(
+            with_data_collection_default(None),
+            json!({ "data_collection": "deny" })
+        );
+        assert_eq!(
+            with_data_collection_default(Some(json!({ "order": ["a"] }))),
+            json!({ "order": ["a"], "data_collection": "deny" })
+        );
+        assert_eq!(
+            with_data_collection_default(Some(json!({ "data_collection": "allow" }))),
+            json!({ "data_collection": "allow" })
+        );
+    }
 
     #[test]
     fn title_from_first_message() {

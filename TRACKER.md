@@ -40,6 +40,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
 - [x] Rename chat (UI + endpoint to update meta title).
 - [x] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
+- [x] New conversations default to `provider.data_collection: "deny"` (unless request/config sets it). Existing convs not migrated. Verified `openrouter/free` still routes with deny.
 - [ ] Code blocks: syntax highlighting (highlight.js) + copy button.
 
 ## Deferred (not needed)
