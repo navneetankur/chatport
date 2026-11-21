@@ -1,7 +1,7 @@
 bind = "0.0.0.0:8787"
 data_dir = "~/.local/share/chatport"
 # openrouter_api_key = "sk-or-..."   # or env OPENROUTER_API_KEY (env wins)
-default_model = "anthropic/claude-sonnet-4.5"
+default_model = "openrouter/free"
 
 # OpenRouter `provider` routing object, passed through as-is. Per-conversation override via API.
 # [default_provider]
