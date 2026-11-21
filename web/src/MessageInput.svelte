@@ -155,7 +155,7 @@
       const n = comp.items.length;
       if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) comp.sel = (comp.sel + 1) % n;
       else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) comp.sel = (comp.sel + n - 1) % n;
-      else if (e.key === 'Enter' && !e.shiftKey) pick(comp.items[comp.sel]);
+      else if (e.key === 'Enter' && !e.shiftKey && !e.altKey) pick(comp.items[comp.sel]);
       else if (e.key === 'Escape') comp = null;
       else return;
       e.preventDefault();

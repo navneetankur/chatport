@@ -4,6 +4,7 @@
 //   Alt-←/→  word back/forward
 //   C-w, Alt-Backspace  delete word back (browsers usually reserve C-w for closing the tab)
 //   C-u  delete to start of line
+//   Alt-Enter  newline (like Shift-Enter)
 // "Line" = logical line (between '\n'), not the visual wrapped line.
 // Deletions go through execCommand so the native undo stack and `input` events keep working.
 
@@ -71,6 +72,11 @@ export function emacsKey(e: KeyboardEvent, ta: HTMLTextAreaElement): boolean {
   } else if ((ctrl && e.key === 'w') || (alt && e.key === 'Backspace')) {
     if (ta.selectionStart !== ta.selectionEnd) deleteRange(ta, ta.selectionStart, ta.selectionEnd);
     else deleteRange(ta, wordBack(s, pos), pos);
+  } else if (alt && e.key === 'Enter') {
+    if (!document.execCommand('insertText', false, '\n')) {
+      ta.setRangeText('\n', ta.selectionStart, ta.selectionEnd, 'end');
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   } else if (ctrl && e.key === 'u') {
     deleteRange(ta, lineStart(s, pos), pos);
   } else {
