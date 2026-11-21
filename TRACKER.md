@@ -33,12 +33,13 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 
 ## Backlog / TODO
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
-- [ ] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
+- [x] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
 - [x] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
 - [x] Stop endpoint `POST /:id/stop`.
 - [x] UI colors: message box and send button are yellow on dark bg — ugly, pick something that fits the dark theme.
 - [x] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
 - [x] Rename chat (UI + endpoint to update meta title).
+- [ ] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -68,3 +69,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Provider name captured from stream; compact meta row + details toggle. Live: openrouter/free → baidu/ernie-5.5-flash-preview:free via Baidu. Not yet seen in a browser.
 - 2026-11-21: Reasoning text + reasoning token count. Also added the missing provider parse test (last round's test edit silently didn't apply).
 - 2026-11-21: Reasoning effort setting. Live: bad value → 422; `none` on ernie-5.5-flash → OpenRouter 400 (mandatory reasoning), `high` OK. Capture in bigfiles/openrouter-stream-effort-high.sse.
+- 2026-11-21: Cache verified with anthropic/claude-haiku-5.5, ~14.7k-token system prompt: turn 2 cached_tokens=14675/14697, cost $0.00184 → $0.00015. Raw SSE in bigfiles/chatport-haiku-cache-2turns.sse. Added TODO: show effort in header.
