@@ -309,7 +309,12 @@
 
   <main>
     <header>
-      <span class="htitle">{current ? `${current.title} — ${current.model}` : 'chatport'}</span>
+      <span class="htitle">
+        {current ? `${current.title} — ${current.model}` : 'chatport'}
+        {#if current?.reasoning_effort}
+          <span class="effort" title="Reasoning effort">· {current.reasoning_effort} effort</span>
+        {/if}
+      </span>
       {#if current}
         {#if totals.tokIn || totals.tokOut}
           <span class="totals" title="Sum over the shown branch">
@@ -510,6 +515,7 @@
     gap: 12px;
   }
   .htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .effort { font-weight: normal; color: #888; }
   .totals { font-weight: normal; font-size: 0.8em; color: #888; white-space: nowrap; }
   .gear { background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1em; }
   .msgs { flex: 1; overflow-y: auto; padding: 16px; }

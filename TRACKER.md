@@ -39,7 +39,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] UI colors: message box and send button are yellow on dark bg — ugly, pick something that fits the dark theme.
 - [x] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
 - [x] Rename chat (UI + endpoint to update meta title).
-- [ ] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
+- [x] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -70,3 +70,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Reasoning text + reasoning token count. Also added the missing provider parse test (last round's test edit silently didn't apply).
 - 2026-11-21: Reasoning effort setting. Live: bad value → 422; `none` on ernie-5.5-flash → OpenRouter 400 (mandatory reasoning), `high` OK. Capture in bigfiles/openrouter-stream-effort-high.sse.
 - 2026-11-21: Cache verified with anthropic/claude-haiku-5.5, ~14.7k-token system prompt: turn 2 cached_tokens=14675/14697, cost $0.00184 → $0.00015. Raw SSE in bigfiles/chatport-haiku-cache-2turns.sse. Added TODO: show effort in header.
+- 2026-11-21: Header shows `· <effort> effort` when set.
