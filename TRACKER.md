@@ -79,3 +79,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Phone layout: ☰ in header opens sidebar as slide-over (<640px), closes on open/new chat/backdrop. Header totals hidden on phone.
 - 2026-11-21: Copy/download/raw toggle + code-block copy (web/src/clipboard.ts). Builds clean; not yet clicked through in a browser.
 - 2026-11-21: Named API keys (`openrouter_api_key` removed, no compat). Live: default key OK, switching to a bogus key → 401 reply error, PATCH to an unknown name → 400. Picker not yet clicked in a browser.
+- 2026-11-21: Optional HTTP Basic auth (`[auth] user/password`; off + startup warning when absent). Middleware precomputes the header with `base64` (already in tree via reqwest). curl: none/wrong → 401 + WWW-Authenticate, right → 200 for API and static. Not yet tried in a browser (SSE fetch should resend creds same-origin).

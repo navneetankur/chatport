@@ -20,6 +20,23 @@ pub struct Config {
     /// OpenRouter `provider` routing object, passed through as-is.
     #[serde(default)]
     pub default_provider: Option<Value>,
+    /// HTTP Basic auth; off when absent.
+    #[serde(default)]
+    pub auth: Option<Auth>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Auth {
+    pub user: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Auth")
+            .field("user", &self.user)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Deserialize, Clone)]

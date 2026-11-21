@@ -1,6 +1,7 @@
 #![allow(clippy::needless_return)] // house style: explicit return in multi-statement fns
 
 mod api;
+mod auth;
 mod config;
 mod provider;
 mod store;
@@ -87,7 +88,15 @@ async fn main() -> Result<()> {
         running: Default::default(),
     });
 
-    let app = api::router(state).fallback(web::static_handler);
+    let mut app = api::router(state).fallback(web::static_handler);
+    match &cfg.auth {
+        Some(a) => {
+            let exp = auth::Expected::new(&a.user, &a.password);
+            app = app.layer(axum::middleware::from_fn_with_state(exp, auth::require));
+            tracing::info!("basic auth enabled for user {:?}", a.user);
+        }
+        None => tracing::warn!("no [auth] in config: anyone on the network can use this"),
+    }
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind)
         .await

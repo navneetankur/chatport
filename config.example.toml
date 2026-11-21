@@ -15,3 +15,8 @@ default_model = "openrouter/free"
 # [default_provider]
 # order = ["anthropic"]
 # allow_fallbacks = false
+
+# HTTP Basic auth (plain HTTP: keeps casual LAN visitors out, not a sniffer). Off when absent.
+# [auth]
+# user = "me"
+# password = "change-me"

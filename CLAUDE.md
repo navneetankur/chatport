@@ -9,7 +9,7 @@ Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embed
 - Storage: `conversations/<id>/meta.json` (mutable, atomic rewrite) + `messages.jsonl` (append-only tree). Never rewrite messages.jsonl.
 - Provider abstraction stays thin: one `Provider` trait, OpenRouter only. Provider-specific stuff (caching markers, `provider` routing object) lives in `src/provider/openrouter.rs`.
 - Attachments: text/markdown only, stored inline in the message, flattened into the prompt in `api::flatten`.
-- No auth (LAN only).
+- Optional HTTP Basic auth via `[auth]` in config (`src/auth.rs`); off when absent. Plain HTTP, LAN only.
 - Keep it small. Don't add features not in PLAN.md/TRACKER.md without asking.
 
 ## Commands
