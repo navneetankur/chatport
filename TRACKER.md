@@ -32,6 +32,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Composer and inline edit share `web/src/MessageInput.svelte` (textarea, 📎, `@` chips + autocomplete, removable attachment chips; Enter submits, Esc cancels edit; buttons via `actions` snippet). App.svelte only owns send/edit/stop.
 - `@path` mentions: `web/src/mentions.ts` parses complete tokens (`@a.md ` ends at whitespace, `@"a b.md"` at the closing quote, no escapes; on send the trailing one counts too). Composer `$effect` on `input` → `GET /api/file?conv=&path=` (`src/files.rs`: `/abs`, `~/x`, else relative to `meta.file_root`; text only, 256 KB cap) → chips (ok / loading / error). × dismisses (text kept). `@` stays in the text; found files are sent as ordinary attachments named by the typed path. `config.default_file_root` seeds new chats; settings has "File root".
 - `@` autocomplete: `typingAt` finds the token at the cursor → 150 ms debounce → `GET /api/ls?conv=&prefix=` (`files::list`: dirs first, dot-entries only if typed, 50 max) → dropdown above the textarea. ↑/↓ or Tab/Shift+Tab move, Enter picks (dir keeps completing, file adds a space / closing quote → chip), Esc closes. Names with spaces get quoted.
+- File tools: `src/tools.rs` (specs, `jail`, run → `ToolResult {output, error, diff}`). `generate` loops rounds (max 20) while the model returns tool calls; one assistant msg holds `tool_rounds`. SSE `tool_round {content, calls, results}` (client moves streamed content into the round), `usage` is the running total. `api::context` builds provider messages (expanded / folded). UI: 🔧 collapsible per call with coloured diff; settings checkbox "File tools" (disabled without file root). Tested with `google/gemini-3.8-flash`.
 - `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
@@ -48,6 +49,9 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Per-message copy / download (.md, `<title-slug>-<msg-id>.md`) for user + assistant; raw-markdown toggle on assistant msgs (not persisted); copy button on code blocks. Reasoning excluded. Clipboard falls back to execCommand on plain-HTTP LAN.
 - [x] Multiple named API keys in config, picked per conversation in settings (switchable mid-chat).
 - [ ] Code blocks: syntax highlighting (highlight.js).
+- [x] File tools (list/read/write/edit in file root, auto-applied, diffs stored).
+- [ ] File tools UI: not yet clicked through in a browser (live-tested via curl only).
+- [ ] Anthropic cache marker sits on the last user msg; in long tool loops the rounds after it aren't cached. Revisit if Claude + tools gets used.
 - [x] `@path` attachments: server-side text files, chip above the composer once the token is complete.
 - [x] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
 - [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
@@ -90,3 +94,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: `@` autocomplete. Tests for `files::list`; curl `ls` for root/sub/abs/~; parser checked in node. Not clicked through in a browser yet.
 - 2026-11-21: Edit can drop attachments (frontend only). Not clicked through in a browser yet.
 - 2026-11-21: Extracted MessageInput.svelte; edit now has 📎, `@` mentions and Enter-to-send. Not clicked through in a browser yet.
+- 2026-11-21: File tools. Live (Gemini 3.8 Flash, scratch root): list → read → edit → create in 5 rounds, diffs stored; follow-up rebuilt history from rounds; `../` refused and reported to the model; tools-off follow-up used folded history. 25 tests pass. UI typechecks, not seen in a browser.

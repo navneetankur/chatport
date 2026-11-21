@@ -206,6 +206,12 @@
           case 'delta':
             if (streaming) streaming.content += e.data.text;
             break;
+          case 'tool_round':
+            if (streaming) {
+              streaming.tool_rounds = [...(streaming.tool_rounds ?? []), e.data];
+              streaming.content = '';
+            }
+            break;
           case 'error':
             error = e.data.message;
             break;
@@ -253,6 +259,35 @@
       ['Time', new Date(m.created_at).toLocaleString()],
     ];
     return rows.filter((r): r is [string, string] => !!r[1]);
+  }
+
+  /** One-line label for a tool call: name and its path argument. */
+  function callLabel(c: api.ToolCall): string {
+    try {
+      const a = JSON.parse(c.arguments || '{}');
+      if (typeof a.path === 'string') return `${c.name} ${a.path}`;
+    } catch {
+      /* show raw name only */
+    }
+    return c.name;
+  }
+
+  /** "+3 −1" for a unified diff. */
+  function diffStat(d: string): string {
+    let add = 0, del = 0;
+    for (const l of d.split('\n')) {
+      if (l.startsWith('+') && !l.startsWith('+++')) add++;
+      else if (l.startsWith('-') && !l.startsWith('---')) del++;
+    }
+    return `+${add} −${del}`;
+  }
+
+  function diffClass(l: string): string {
+    if (l.startsWith('+++') || l.startsWith('---')) return 'dh';
+    if (l.startsWith('@@')) return 'dh';
+    if (l.startsWith('+')) return 'da';
+    if (l.startsWith('-')) return 'dd';
+    return '';
   }
 
   let openDetails = $state<Record<string, boolean>>({});
@@ -362,6 +397,27 @@
                 <div class="plain">{m.reasoning}</div>
               </details>
             {/if}
+            {#each m.tool_rounds ?? [] as r}
+              {#if r.content}<div class="text md">{@html renderMarkdown(r.content)}</div>{/if}
+              {#each r.calls as c, i}
+                {@const res = r.results[i]}
+                <details class="tool" class:failed={res?.error}>
+                  <summary>
+                    🔧 {callLabel(c)}
+                    {#if res?.error}<span class="terr">failed</span>{/if}
+                    {#if res?.diff}<span class="tstat">{diffStat(res.diff)}</span>{/if}
+                  </summary>
+                  <div class="tlabel">arguments</div>
+                  <pre>{c.arguments}</pre>
+                  {#if res?.diff}
+                    <div class="tlabel">diff</div>
+                    <pre class="diff">{#each res.diff.split('\n') as l}<span class={diffClass(l)}>{l}</span>{'\n'}{/each}</pre>
+                  {/if}
+                  <div class="tlabel">result</div>
+                  <pre>{res?.output}</pre>
+                </details>
+              {/each}
+            {/each}
             {#if openRaw[m.id]}
               <div class="text plain raw">{m.content}</div>
             {:else if m === streaming}
@@ -371,6 +427,7 @@
               <div class="text md" use:codeCopy={html}>{@html html}</div>
             {/if}
             {#if m.partial && !m.error && m !== streaming}<div class="att">(stopped)</div>{/if}
+            {#if m.warning}<div class="warn">⚠ {m.warning}</div>{/if}
             {#if m.error}<div class="err">⚠ {m.error}</div>{/if}
           {/if}
           {#if m !== streaming && editing !== m.id}
@@ -584,6 +641,17 @@
   .thinking .plain { margin-top: 4px; max-height: 40vh; overflow-y: auto; }
   .details dd { margin: 0; overflow-wrap: anywhere; }
   .err { color: #c44; margin-top: 4px; }
+  .warn { color: #b8860b; margin-top: 4px; }
+  .tool { border: 1px solid var(--border); border-radius: 6px; margin: 6px 0; padding: 4px 8px; font-size: 0.9em; }
+  .tool summary { cursor: pointer; font-family: monospace; }
+  .tool.failed { border-color: #c44; }
+  .tool pre { max-height: 300px; overflow: auto; margin: 2px 0 6px; padding: 6px; background: var(--field); white-space: pre-wrap; word-break: break-word; }
+  .tlabel { opacity: 0.6; font-size: 0.85em; margin-top: 4px; }
+  .terr { color: #c44; margin-left: 6px; }
+  .tstat { opacity: 0.7; margin-left: 6px; }
+  .diff .da { color: #2a9d4a; }
+  .diff .dd { color: #d0453f; }
+  .diff .dh { opacity: 0.6; }
   .menu, .backdrop { display: none; }
   @media (max-width: 640px) {
     .menu {

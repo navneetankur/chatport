@@ -14,6 +14,8 @@ use serde_json::Value;
 pub enum Role {
     User,
     Assistant,
+    /// Tool result (only in requests, never a stored message's role).
+    Tool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,10 +52,55 @@ pub struct Usage {
     pub cost: Option<f64>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    /// Raw JSON arguments as the model sent them.
+    pub arguments: String,
+}
+
+/// A tool offered to the model; `parameters` is a JSON schema.
+#[derive(Clone, Debug)]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    /// Assistant: calls it made.
+    pub tool_calls: Vec<ToolCall>,
+    /// Tool: the call this answers.
+    pub tool_call_id: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn text(role: Role, content: String) -> Self {
+        Self {
+            role,
+            content,
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
+    }
+}
+
+impl Usage {
+    /// Sum of several requests (one per tool round).
+    pub fn add(&mut self, o: &Usage) {
+        self.prompt_tokens += o.prompt_tokens;
+        self.completion_tokens += o.completion_tokens;
+        self.cached_tokens += o.cached_tokens;
+        self.reasoning_tokens += o.reasoning_tokens;
+        self.cost = match (self.cost, o.cost) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
+        };
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +114,8 @@ pub struct ChatRequest {
     pub options: Option<Value>,
     pub cache: CachePolicy,
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// Tools offered; empty = none.
+    pub tools: Vec<ToolSpec>,
 }
 
 #[derive(Debug)]
@@ -79,6 +128,13 @@ pub enum ChatEvent {
     /// Reasoning ("thinking") text, streamed before/alongside the answer.
     Reasoning(String),
     Usage(Usage),
+    /// Fragment of a tool call; fragments with the same `index` belong together.
+    ToolCall {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments: String,
+    },
     Done,
 }
 

@@ -6,6 +6,7 @@ mod config;
 mod files;
 mod provider;
 mod store;
+mod tools;
 mod tree;
 mod web;
 

@@ -155,6 +155,10 @@ Title: after first assistant reply, fire a cheap model call to generate a title 
 5. Settings: model picker, provider options, caching, usage display.
 6. Attachments, auto-title, stop button.
 
+## File tools
+Per-chat switch `meta.tools` (needs `file_root`). Tools: `list_dir`, `read_file` (opt. line range), `write_file` (creates dirs), `edit_file` (exact unique replace). No delete. Jailed to `file_root` (relative only, no `..`, symlinks checked on the deepest existing ancestor). 256 KB cap. Applied directly, no approval; each write stores a unified diff (diff only, no old content). No MCP.
+Storage: the whole loop runs in one generation and is saved as one assistant message with `tool_rounds: [{content, calls, results}]` — tree/branching unchanged. Context expands rounds into `tool_calls` + `tool` messages; with tools off they are folded into the assistant text. Calls while tools are off → message `warning`.
+
 ## Later / not now
 
 Images & PDFs (→ `attachments/<hash>` refs), search (SQLite index over JSONL), auth, other providers, multi-user.

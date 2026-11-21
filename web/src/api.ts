@@ -13,6 +13,25 @@ export interface Attachment {
   content: string;
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ToolResult {
+  call_id: string;
+  output: string;
+  error?: boolean;
+  diff?: string;
+}
+
+export interface ToolRound {
+  content?: string;
+  calls: ToolCall[];
+  results: ToolResult[];
+}
+
 export interface Message {
   id: string;
   parent_id: string | null;
@@ -20,12 +39,14 @@ export interface Message {
   content: string;
   reasoning?: string;
   attachments?: Attachment[];
+  tool_rounds?: ToolRound[];
   model?: string;
   requested_model?: string;
   provider_name?: string;
   usage?: Usage;
   partial?: boolean;
   error?: string;
+  warning?: string;
   created_at: number;
 }
 
@@ -44,6 +65,7 @@ export interface Meta {
   reasoning_effort?: ReasoningEffort | null;
   key_name?: string | null;
   file_root?: string | null;
+  tools?: boolean;
   leaf?: string | null;
 }
 
@@ -78,6 +100,7 @@ export type StreamEvent =
   | { event: 'delta'; data: { text: string } }
   | { event: 'reasoning'; data: { text: string } }
   | { event: 'usage'; data: Usage }
+  | { event: 'tool_round'; data: ToolRound }
   | { event: 'error'; data: { message: string } }
   | { event: 'done'; data: Message };
 
@@ -155,6 +178,7 @@ export type MetaPatch = Partial<{
   reasoning_effort: ReasoningEffort | null; // null = model default
   key_name: string | null; // null = config default
   file_root: string; // "" clears
+  tools: boolean;
 }>;
 
 export interface FsEntry {

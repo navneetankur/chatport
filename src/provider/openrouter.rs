@@ -46,10 +46,29 @@ pub fn build_body(req: &ChatRequest) -> Value {
     for (i, m) in req.messages.iter().enumerate() {
         let content = if markers && Some(i) == last_user {
             cached_text(&m.content)
+        } else if m.content.is_empty() && !m.tool_calls.is_empty() {
+            Value::Null
         } else {
             json!(m.content)
         };
-        messages.push(json!({ "role": m.role, "content": content }));
+        let mut msg = json!({ "role": m.role, "content": content });
+        if !m.tool_calls.is_empty() {
+            msg["tool_calls"] = m
+                .tool_calls
+                .iter()
+                .map(|c| {
+                    json!({
+                        "id": c.id,
+                        "type": "function",
+                        "function": { "name": c.name, "arguments": c.arguments },
+                    })
+                })
+                .collect();
+        }
+        if let Some(id) = &m.tool_call_id {
+            msg["tool_call_id"] = json!(id);
+        }
+        messages.push(msg);
     }
     let mut body = json!({
         "model": req.model,
@@ -62,6 +81,22 @@ pub fn build_body(req: &ChatRequest) -> Value {
     }
     if let Some(e) = req.reasoning_effort {
         body["reasoning"] = json!({ "effort": e });
+    }
+    if !req.tools.is_empty() {
+        body["tools"] = req
+            .tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                })
+            })
+            .collect();
     }
     body
 }
@@ -104,6 +139,23 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
         && !t.is_empty()
     {
         out.push(ChatEvent::Delta(t.to_string()));
+    }
+    if let Some(calls) = v
+        .pointer("/choices/0/delta/tool_calls")
+        .and_then(Value::as_array)
+    {
+        for (pos, c) in calls.iter().enumerate() {
+            let s = |p: &str| c.pointer(p).and_then(Value::as_str).map(str::to_string);
+            out.push(ChatEvent::ToolCall {
+                index: c
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .map_or(pos, |i| i as usize),
+                id: s("/id").filter(|x| !x.is_empty()),
+                name: s("/function/name").filter(|x| !x.is_empty()),
+                arguments: s("/function/arguments").unwrap_or_default(),
+            });
+        }
     }
     if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
         let n = |p: &str| u.pointer(p).and_then(Value::as_u64).unwrap_or(0);
@@ -235,22 +287,14 @@ mod tests {
             model: model.into(),
             system: Some("sys".into()),
             messages: vec![
-                ChatMessage {
-                    role: Role::User,
-                    content: "a".into(),
-                },
-                ChatMessage {
-                    role: Role::Assistant,
-                    content: "b".into(),
-                },
-                ChatMessage {
-                    role: Role::User,
-                    content: "c".into(),
-                },
+                ChatMessage::text(Role::User, "a".into()),
+                ChatMessage::text(Role::Assistant, "b".into()),
+                ChatMessage::text(Role::User, "c".into()),
             ],
             options: Some(json!({ "order": ["anthropic"] })),
             cache,
             reasoning_effort: None,
+            tools: vec![],
         }
     }
 
@@ -312,5 +356,61 @@ mod tests {
         );
         assert!(matches!(parse_chunk("[DONE]").unwrap()[0], ChatEvent::Done));
         assert!(parse_chunk(r#"{"error":{"message":"nope"}}"#).is_err());
+    }
+
+    #[test]
+    fn tools_and_tool_messages_in_body() {
+        let mut r = req("x/y", CachePolicy::Off);
+        assert!(build_body(&r).get("tools").is_none());
+        r.tools = crate::tools::specs();
+        r.messages.push(ChatMessage {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "t1".into(),
+                name: "read_file".into(),
+                arguments: r#"{"path":"a"}"#.into(),
+            }],
+            tool_call_id: None,
+        });
+        r.messages.push(ChatMessage {
+            role: Role::Tool,
+            content: "hello".into(),
+            tool_calls: vec![],
+            tool_call_id: Some("t1".into()),
+        });
+        let b = build_body(&r);
+        assert_eq!(b["tools"][1]["function"]["name"], "read_file");
+        let m = b["messages"].as_array().unwrap();
+        let call = &m[4];
+        assert!(call["content"].is_null());
+        assert_eq!(
+            call["tool_calls"][0]["function"]["arguments"],
+            r#"{"path":"a"}"#
+        );
+        assert_eq!(
+            m[5],
+            json!({ "role": "tool", "content": "hello", "tool_call_id": "t1" })
+        );
+    }
+
+    #[test]
+    fn parses_tool_call_fragments() {
+        let ev = parse_chunk(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"t1","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(&ev[..], [ChatEvent::ToolCall { index: 0, id: Some(i), name: Some(n), arguments }]
+            if i == "t1" && n == "read_file" && arguments.is_empty())
+        );
+        let ev = parse_chunk(
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"pa"}}]}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(&ev[..], [ChatEvent::ToolCall { index: 1, id: None, name: None, arguments }]
+            if arguments == "{\"pa")
+        );
     }
 }

@@ -3,7 +3,8 @@
 //! data_dir/conversations/<id>/meta.json      mutable settings, rewritten atomically
 //! data_dir/conversations/<id>/messages.jsonl append-only message tree
 
-use crate::provider::{CachePolicy, ReasoningEffort, Role, Usage};
+use crate::provider::{CachePolicy, ReasoningEffort, Role, ToolCall, Usage};
+use crate::tools::ToolResult;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,6 +45,9 @@ pub struct Meta {
     /// Directory `@relative/path` attachments resolve against.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_root: Option<String>,
+    /// Offer file tools (inside `file_root`) to the model.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tools: bool,
     /// Currently shown branch tip. None = last appended message.
     #[serde(default)]
     pub leaf: Option<String>,
@@ -53,6 +57,16 @@ pub struct Meta {
 pub struct Attachment {
     pub name: String,
     pub content: String,
+}
+
+/// One model request that ended in tool calls, plus their results.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ToolRound {
+    /// Text the model wrote before calling the tools.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub content: String,
+    pub calls: Vec<ToolCall>,
+    pub results: Vec<ToolResult>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -66,6 +80,9 @@ pub struct Message {
     pub reasoning: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
+    /// Assistant: tool rounds before the final `content`, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_rounds: Vec<ToolRound>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// Model id the request asked for, when it differs from `model` (e.g. a router like `openrouter/free`).
@@ -81,6 +98,9 @@ pub struct Message {
     pub partial: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Non-fatal problem, e.g. the model called tools while they were off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     pub created_at: u64,
 }
 
@@ -93,12 +113,14 @@ impl Message {
             content,
             reasoning: String::new(),
             attachments,
+            tool_rounds: vec![],
             model: None,
             requested_model: None,
             provider_name: None,
             usage: None,
             partial: false,
             error: None,
+            warning: None,
             created_at: now_ms(),
         }
     }

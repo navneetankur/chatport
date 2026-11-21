@@ -1,7 +1,10 @@
 use crate::AppState;
 use crate::files;
-use crate::provider::{CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role};
-use crate::store::{Attachment, Message, Meta, new_id, now_ms};
+use crate::provider::{
+    CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role, ToolCall, Usage,
+};
+use crate::store::{Attachment, Message, Meta, ToolRound, new_id, now_ms};
+use crate::tools;
 use crate::tree;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -145,6 +148,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         reasoning_effort: None,
         key_name: None,
         file_root: s.config.default_file_root.clone(),
+        tools: false,
         leaf: None,
     };
     s.store.put_meta(&meta)?;
@@ -225,6 +229,7 @@ struct PatchReq {
     key_name: Option<Option<String>>,
     /// "" clears.
     file_root: Option<String>,
+    tools: Option<bool>,
 }
 fn some_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -270,6 +275,9 @@ async fn patch_conv(
     if let Some(r) = r.file_root {
         let r = r.trim();
         meta.file_root = (!r.is_empty()).then(|| r.to_string());
+    }
+    if let Some(t) = r.tools {
+        meta.tools = t;
     }
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
@@ -402,6 +410,88 @@ pub fn flatten(m: &Message) -> String {
     out
 }
 
+/// Tool rounds beyond this end the reply with an error.
+const MAX_TOOL_ROUNDS: usize = 20;
+
+/// Conversation path as provider messages. Tool rounds become assistant
+/// `tool_calls` + `tool` messages when tools are offered; otherwise they are
+/// folded into the assistant text (providers reject tool messages without tools).
+fn context(path: &[&Message], with_tools: bool) -> Vec<ChatMessage> {
+    let mut out = Vec::new();
+    for m in path {
+        match m.role {
+            Role::User => out.push(ChatMessage::text(Role::User, flatten(m))),
+            Role::Assistant if with_tools => {
+                for r in &m.tool_rounds {
+                    out.push(ChatMessage {
+                        role: Role::Assistant,
+                        content: r.content.clone(),
+                        tool_calls: r.calls.clone(),
+                        tool_call_id: None,
+                    });
+                    for res in &r.results {
+                        out.push(ChatMessage {
+                            role: Role::Tool,
+                            content: res.output.clone(),
+                            tool_calls: vec![],
+                            tool_call_id: Some(res.call_id.clone()),
+                        });
+                    }
+                }
+                if !m.content.is_empty() {
+                    out.push(ChatMessage::text(Role::Assistant, m.content.clone()));
+                }
+            }
+            Role::Assistant => {
+                let mut text = String::new();
+                for r in &m.tool_rounds {
+                    if !r.content.is_empty() {
+                        text.push_str(&r.content);
+                        text.push_str("\n\n");
+                    }
+                    for (c, res) in r.calls.iter().zip(&r.results) {
+                        text.push_str(&format!(
+                            "[tool {}({}) → {}]\n\n",
+                            c.name, c.arguments, res.output
+                        ));
+                    }
+                }
+                text.push_str(&m.content);
+                if !text.is_empty() {
+                    out.push(ChatMessage::text(Role::Assistant, text));
+                }
+            }
+            Role::Tool => {}
+        }
+    }
+    return out;
+}
+
+/// Adds a streamed tool-call fragment to `calls`.
+fn merge_call(
+    calls: &mut Vec<ToolCall>,
+    index: usize,
+    id: Option<String>,
+    name: Option<String>,
+    args: &str,
+) {
+    while calls.len() <= index {
+        calls.push(ToolCall {
+            id: String::new(),
+            name: String::new(),
+            arguments: String::new(),
+        });
+    }
+    let c = &mut calls[index];
+    if let Some(id) = id {
+        c.id = id;
+    }
+    if let Some(n) = name {
+        c.name.push_str(&n);
+    }
+    c.arguments.push_str(args);
+}
+
 /// Streams the reply as SSE. Generation runs in a spawned task so the reply is
 /// saved even if the browser disconnects.
 fn generate(
@@ -420,21 +510,24 @@ fn generate(
         .config
         .key_for(meta.key_name.as_deref())
         .map(str::to_string);
-    let req = ChatRequest {
+    // Tools need a root to work in.
+    let tool_root = meta
+        .file_root
+        .clone()
+        .filter(|r| meta.tools && !r.trim().is_empty());
+    let mut req = ChatRequest {
         key: key.as_ref().cloned().unwrap_or_default(),
         model: meta.model.clone(),
         system: meta.system.clone(),
-        messages: tree::path(&msgs, &user.id)
-            .into_iter()
-            .filter(|m| !(m.role == Role::Assistant && m.content.is_empty()))
-            .map(|m| ChatMessage {
-                role: m.role,
-                content: flatten(m),
-            })
-            .collect(),
+        messages: context(&tree::path(&msgs, &user.id), tool_root.is_some()),
         options: meta.provider.clone(),
         cache: meta.cache,
         reasoning_effort: meta.reasoning_effort,
+        tools: if tool_root.is_some() {
+            tools::specs()
+        } else {
+            vec![]
+        },
     };
     let conv_id = meta.id.clone();
     let gen_id = new_id();
@@ -446,25 +539,37 @@ fn generate(
     tokio::spawn(async move {
         let mut asst = Message::assistant(user.id.clone(), meta.model.clone());
         let mut done = false;
-        let started = tokio::select! {
-            r = async {
-                key?;
-                s.provider.stream_chat(req).await
-            } => Some(r),
-            _ = &mut cancel => None,
-        };
-        match started {
-            None => tracing::info!("generation in {conv_id} stopped before first token"),
-            Some(Err(e)) => asst.error = Some(format!("{e:#}")),
-            Some(Ok(mut stream)) => loop {
+        let mut total: Option<Usage> = None;
+        // Each round is one model request; it continues while the model calls tools.
+        'rounds: for round in 0.. {
+            if let Err(e) = &key {
+                asst.error = Some(format!("{e:#}"));
+                break;
+            }
+            let started = tokio::select! {
+                r = s.provider.stream_chat(req.clone()) => r,
+                _ = &mut cancel => {
+                    tracing::info!("generation in {conv_id} stopped before first token");
+                    break;
+                }
+            };
+            let mut stream = match started {
+                Ok(st) => st,
+                Err(e) => {
+                    asst.error = Some(format!("{e:#}"));
+                    break;
+                }
+            };
+            let mut calls: Vec<ToolCall> = Vec::new();
+            loop {
                 let item = tokio::select! {
                     i = stream.next() => i,
                     _ = &mut cancel => {
                         tracing::info!("generation in {conv_id} stopped");
-                        break;
+                        break 'rounds;
                     }
                 };
-                let Some(item) = item else { break };
+                let Some(item) = item else { break 'rounds };
                 match item {
                     Ok(ChatEvent::Model(m)) => {
                         record_model(&mut asst, &meta.model, m);
@@ -483,19 +588,63 @@ fn generate(
                         let _ = tx.send(ev("delta", json!({ "text": t })));
                     }
                     Ok(ChatEvent::Usage(u)) => {
-                        let _ = tx.send(ev("usage", &u));
-                        asst.usage = Some(u);
+                        let t = total.get_or_insert_with(Usage::default);
+                        t.add(&u);
+                        let _ = tx.send(ev("usage", &*t));
+                        asst.usage = Some(t.clone());
                     }
-                    Ok(ChatEvent::Done) => {
-                        done = true;
-                        break;
-                    }
+                    Ok(ChatEvent::ToolCall {
+                        index,
+                        id,
+                        name,
+                        arguments,
+                    }) => merge_call(&mut calls, index, id, name, &arguments),
+                    Ok(ChatEvent::Done) => break,
                     Err(e) => {
                         asst.error = Some(format!("{e:#}"));
-                        break;
+                        break 'rounds;
                     }
                 }
-            },
+            }
+            if calls.is_empty() {
+                done = true;
+                break;
+            }
+            let Some(root) = &tool_root else {
+                let names: Vec<&str> = calls.iter().map(|c| c.name.as_str()).collect();
+                let w = format!(
+                    "model tried to call {}, but tools are off for this chat",
+                    names.join(", ")
+                );
+                tracing::warn!("{conv_id}: {w}");
+                asst.warning = Some(w);
+                done = true;
+                break;
+            };
+            if round >= MAX_TOOL_ROUNDS {
+                asst.error = Some(format!("stopped after {MAX_TOOL_ROUNDS} tool rounds"));
+                break;
+            }
+            for (i, c) in calls.iter_mut().enumerate() {
+                if c.id.is_empty() {
+                    c.id = format!("call_{round}_{i}");
+                }
+            }
+            let results: Vec<_> = calls.iter().map(|c| tools::run(root, c)).collect();
+            let r = ToolRound {
+                content: std::mem::take(&mut asst.content),
+                calls,
+                results,
+            };
+            let _ = tx.send(ev("tool_round", &r));
+            req.messages.extend(context(
+                &[&Message {
+                    tool_rounds: vec![r.clone()],
+                    ..Message::assistant(String::new(), String::new())
+                }],
+                true,
+            ));
+            asst.tool_rounds.push(r);
         }
         {
             let mut running = s.running.lock().unwrap();
@@ -594,5 +743,44 @@ mod tests {
         let f = flatten(&m);
         assert!(f.starts_with("File: a.md\n`````\n"));
         assert!(f.ends_with("`````\n\nexplain"));
+    }
+
+    #[test]
+    fn context_expands_or_folds_tool_rounds() {
+        let user = Message::user(None, "hi".into(), vec![]);
+        let mut asst = Message::assistant(user.id.clone(), "m".into());
+        asst.content = "done".into();
+        asst.tool_rounds = vec![ToolRound {
+            content: "looking".into(),
+            calls: vec![ToolCall {
+                id: "t1".into(),
+                name: "read_file".into(),
+                arguments: r#"{"path":"a"}"#.into(),
+            }],
+            results: vec![tools::ToolResult {
+                call_id: "t1".into(),
+                output: "AAA".into(),
+                error: false,
+                diff: None,
+            }],
+        }];
+        let with = context(&[&user, &asst], true);
+        let roles: Vec<Role> = with.iter().map(|m| m.role).collect();
+        assert_eq!(
+            roles,
+            [Role::User, Role::Assistant, Role::Tool, Role::Assistant]
+        );
+        assert_eq!(with[1].tool_calls[0].id, "t1");
+        assert_eq!(with[2].tool_call_id.as_deref(), Some("t1"));
+        assert_eq!(with[3].content, "done");
+
+        let without = context(&[&user, &asst], false);
+        assert_eq!(without.len(), 2);
+        let t = &without[1].content;
+        assert!(
+            t.starts_with("looking") && t.contains("AAA") && t.ends_with("done"),
+            "{t}"
+        );
+        assert!(without.iter().all(|m| m.tool_calls.is_empty()));
     }
 }

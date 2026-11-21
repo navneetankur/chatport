@@ -19,6 +19,7 @@
   let provText = $state(init.provider ? JSON.stringify(init.provider, null, 2) : '');
   let keyName = $state(init.key_name ?? '');
   let fileRoot = $state(init.file_root ?? '');
+  let tools = $state(init.tools ?? false);
   let keys = $state<{ names: string[]; default: string }>({ names: [], default: '' });
   let models = $state<ModelInfo[]>([]);
   let error = $state('');
@@ -69,6 +70,7 @@
         reasoning_effort: effort || null,
         key_name: keyName || null,
         file_root: fileRoot.trim(),
+        tools,
         provider: Object.keys(prov).length ? prov : null,
       });
       onsaved(m);
@@ -125,6 +127,11 @@
     File root
     <input bind:value={fileRoot} placeholder="~/notes" />
     <small>Directory for <code>@relative/path</code> attachments. <code>@/abs</code> and <code>@~/x</code> work without it.</small>
+  </label>
+
+  <label class="row">
+    <input type="checkbox" bind:checked={tools} disabled={!fileRoot.trim()} />
+    File tools: the model can list, read, write and edit text files in the file root (applied directly)
   </label>
 
   <label>
