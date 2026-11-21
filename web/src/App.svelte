@@ -6,7 +6,8 @@
   import { renderMarkdown } from './markdown';
   import { codeCopy, copyWithFeedback, downloadText } from './clipboard';
   import Settings from './Settings.svelte';
-  import { mentions } from './mentions';
+  import { completion, mentions, typingAt, type Typing } from './mentions';
+  import type { FsEntry } from './api';
 
   let convs = $state<Meta[]>([]);
   let current = $state<Meta | null>(null);
@@ -155,6 +156,56 @@
     });
   });
 
+  // `@` autocomplete: debounced listing of the directory being typed.
+  let textarea: HTMLTextAreaElement | undefined = $state();
+  let comp = $state<{ typing: Typing; items: FsEntry[]; sel: number } | null>(null);
+  let compTimer: ReturnType<typeof setTimeout> | undefined;
+  let compSeq = 0;
+
+  function updateComp() {
+    clearTimeout(compTimer);
+    const t = textarea ? typingAt(input, textarea.selectionStart) : null;
+    if (!t) {
+      comp = null;
+      return;
+    }
+    const seq = ++compSeq;
+    compTimer = setTimeout(async () => {
+      try {
+        const items = await api.listFiles(current?.id, t.path);
+        if (seq === compSeq) comp = items.length ? { typing: t, items, sel: 0 } : null;
+      } catch {
+        if (seq === compSeq) comp = null;
+      }
+    }, 150);
+  }
+
+  async function pick(e: FsEntry) {
+    if (!comp || !textarea) return;
+    const { start } = comp.typing;
+    const end = textarea.selectionStart;
+    const ins = completion(e.path, e.dir, comp.typing.quoted);
+    input = input.slice(0, start) + ins + input.slice(end);
+    comp = null;
+    await tick();
+    textarea.focus();
+    textarea.setSelectionRange(start + ins.length, start + ins.length);
+    if (e.dir) updateComp();
+  }
+
+  /** Keys for the open dropdown; true if handled. */
+  function compKey(e: KeyboardEvent): boolean {
+    if (!comp) return false;
+    const n = comp.items.length;
+    if (e.key === 'ArrowDown') comp.sel = (comp.sel + 1) % n;
+    else if (e.key === 'ArrowUp') comp.sel = (comp.sel + n - 1) % n;
+    else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) pick(comp.items[comp.sel]);
+    else if (e.key === 'Escape') comp = null;
+    else return false;
+    e.preventDefault();
+    return true;
+  }
+
   function dismissAt(path: string) {
     delete atFiles[path];
     atDismissed.push(path);
@@ -286,6 +337,7 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    if (compKey(e)) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       send();
@@ -496,8 +548,23 @@
         onchange={(e) => addFiles(e.currentTarget.files)}
       />
       <button type="button" title="Attach text/markdown files" onclick={() => fileInput?.click()}>📎</button>
+      {#if comp}
+        <ul class="comp" role="listbox">
+          {#each comp.items as it, i (it.path)}
+            <li role="option" aria-selected={i === comp.sel}>
+              <button type="button" class:sel={i === comp.sel} onmousedown={(e) => { e.preventDefault(); pick(it); }}>
+                {it.dir ? '📁' : '📄'} {it.path}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
       <textarea
+        bind:this={textarea}
         bind:value={input}
+        oninput={updateComp}
+        onclick={updateComp}
+        onblur={() => { clearTimeout(compTimer); compSeq++; comp = null; }}
         onkeydown={onKey}
         rows="3"
         placeholder="Message (Enter to send, Shift+Enter for newline)"
@@ -667,7 +734,17 @@
   .chip.at { background: #4a8af433; }
   .chip.at-err { background: #e5484d33; max-width: 100%; overflow-wrap: anywhere; }
   .chip button { background: none; border: none; color: #888; cursor: pointer; }
-  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; }
+  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; position: relative; }
+  .comp {
+    position: absolute; bottom: 100%; left: 16px; right: 16px; z-index: 5;
+    max-height: 40vh; overflow-y: auto; margin: 0 0 4px; padding: 4px 0; list-style: none;
+    background: var(--field); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9em;
+  }
+  .comp button {
+    display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 0;
+    padding: 3px 10px; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere;
+  }
+  .comp button.sel, .comp button:hover { background: #4a8af433; }
   textarea { flex: 1; resize: vertical; font: inherit; padding: 8px; }
   .menu, .backdrop { display: none; }
   @media (max-width: 640px) {

@@ -48,6 +48,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/models", get(models))
         .route("/api/keys", get(keys))
         .route("/api/file", get(file))
+        .route("/api/ls", get(ls))
         .route("/api/conversations", get(list).post(create))
         .route(
             "/api/conversations/{id}",
@@ -69,6 +70,14 @@ async fn keys(State(s): St) -> Json<Value> {
     Json(json!({ "names": s.config.key_names(), "default": s.config.default_key }))
 }
 
+/// File root of `conv`, or the config default when no conversation exists yet.
+fn file_root(s: &AppState, conv: Option<&str>) -> R<Option<String>> {
+    match conv {
+        Some(id) => Ok(load_meta(s, id)?.file_root),
+        None => Ok(s.config.default_file_root.clone()),
+    }
+}
+
 #[derive(Deserialize)]
 struct FileQuery {
     /// Conversation whose file root applies; absent = config default.
@@ -78,10 +87,7 @@ struct FileQuery {
 
 /// Reads a server-side text file for an `@path` mention in the composer.
 async fn file(State(s): St, Query(q): Query<FileQuery>) -> R<Json<Attachment>> {
-    let root = match &q.conv {
-        Some(id) => load_meta(&s, id)?.file_root,
-        None => s.config.default_file_root.clone(),
-    };
+    let root = file_root(&s, q.conv.as_deref())?;
     let read = files::resolve(root.as_deref(), &q.path).and_then(|p| files::read_text(&p, &q.path));
     match read {
         Ok(a) => {
@@ -93,6 +99,20 @@ async fn file(State(s): St, Query(q): Query<FileQuery>) -> R<Json<Attachment>> {
             Err(bad(&format!("{e:#}")))
         }
     }
+}
+
+#[derive(Deserialize)]
+struct LsQuery {
+    conv: Option<String>,
+    #[serde(default)]
+    prefix: String,
+}
+
+/// Autocomplete for `@` mentions: entries matching the typed prefix.
+async fn ls(State(s): St, Query(q): Query<LsQuery>) -> R<Json<Vec<files::Entry>>> {
+    let root = file_root(&s, q.conv.as_deref())?;
+    let entries = files::list(root.as_deref(), &q.prefix).map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(Json(entries))
 }
 
 async fn list(State(s): St) -> R<Json<Vec<Meta>>> {

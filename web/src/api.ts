@@ -157,6 +157,17 @@ export type MetaPatch = Partial<{
   file_root: string; // "" clears
 }>;
 
+export interface FsEntry {
+  path: string;
+  dir: boolean;
+}
+
+export async function listFiles(conv: string | undefined, prefix: string): Promise<FsEntry[]> {
+  const q = new URLSearchParams({ prefix });
+  if (conv) q.set('conv', conv);
+  return json<FsEntry[]>(await fetch(`/api/ls?${q}`));
+}
+
 /** Server-side file for an `@path` mention; throws with the server's reason. */
 export async function fetchFile(conv: string | undefined, path: string): Promise<Attachment> {
   const q = new URLSearchParams({ path });
