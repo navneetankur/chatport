@@ -41,7 +41,8 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Rename chat (UI + endpoint to update meta title).
 - [x] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
 - [x] New conversations default to `provider.data_collection: "deny"` (unless request/config sets it). Existing convs not migrated. Verified `openrouter/free` still routes with deny.
-- [ ] Code blocks: syntax highlighting (highlight.js) + copy button.
+- [x] Per-message copy / download (.md, `<title-slug>-<msg-id>.md`) for user + assistant; raw-markdown toggle on assistant msgs (not persisted); copy button on code blocks. Reasoning excluded. Clipboard falls back to execCommand on plain-HTTP LAN.
+- [ ] Code blocks: syntax highlighting (highlight.js).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -74,3 +75,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Cache verified with anthropic/claude-haiku-5.5, ~14.7k-token system prompt: turn 2 cached_tokens=14675/14697, cost $0.00184 → $0.00015. Raw SSE in bigfiles/chatport-haiku-cache-2turns.sse. Added TODO: show effort in header.
 - 2026-11-21: Header shows `· <effort> effort` when set.
 - 2026-11-21: Phone layout: ☰ in header opens sidebar as slide-over (<640px), closes on open/new chat/backdrop. Header totals hidden on phone.
+- 2026-11-21: Copy/download/raw toggle + code-block copy (web/src/clipboard.ts). Builds clean; not yet clicked through in a browser.

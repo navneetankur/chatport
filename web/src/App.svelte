@@ -4,6 +4,7 @@
   import type { Attachment, Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
+  import { codeCopy, copyWithFeedback, downloadText } from './clipboard';
   import Settings from './Settings.svelte';
 
   let convs = $state<Meta[]>([]);
@@ -270,6 +271,14 @@
   }
 
   let openDetails = $state<Record<string, boolean>>({});
+  let openRaw = $state<Record<string, boolean>>({});
+
+  function slug(t: string): string {
+    return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'chat';
+  }
+  function download(m: Message) {
+    downloadText(`${slug(current?.title ?? '')}-${m.id}.md`, m.content);
+  }
 
   onMount(async () => {
     try {
@@ -358,7 +367,14 @@
                 <div class="plain">{m.reasoning}</div>
               </details>
             {/if}
-            <div class="text md">{@html renderMarkdown(m.content)}</div>
+            {#if openRaw[m.id]}
+              <div class="text plain raw">{m.content}</div>
+            {:else if m === streaming}
+              <div class="text md">{@html renderMarkdown(m.content)}</div>
+            {:else}
+              {@const html = renderMarkdown(m.content)}
+              <div class="text md" use:codeCopy={html}>{@html html}</div>
+            {/if}
             {#if m.partial && !m.error && m !== streaming}<div class="att">(stopped)</div>{/if}
             {#if m.error}<div class="err">⚠ {m.error}</div>{/if}
           {/if}
@@ -372,9 +388,16 @@
                   <button onclick={() => switchTo(m, 1)} disabled={busy || sibs.at(-1) === m}>›</button>
                 </span>
               {/if}
+              <button class="icon" title="Copy markdown" onclick={(e) => copyWithFeedback(e.currentTarget, m.content)}>⧉</button>
+              <button class="icon" title="Download .md" onclick={() => download(m)}>⤓</button>
               {#if m.role === 'user'}
                 <button class="icon" title="Edit" onclick={() => startEdit(m)} disabled={busy}>✎</button>
               {:else}
+                <button
+                  class="icon"
+                  title="Show raw markdown"
+                  class:on={openRaw[m.id]}
+                  onclick={() => (openRaw[m.id] = !openRaw[m.id])}>&lt;/&gt;</button>
                 <button class="icon" title="Regenerate" onclick={() => regen(m)} disabled={busy}>↻</button>
                 <span>{shortLine(m)}</span>
                 <button
@@ -532,7 +555,14 @@
     padding: 8px 12px;
   }
   .plain { white-space: pre-wrap; }
-  .md :global(pre) { background: #8882; padding: 8px; overflow-x: auto; border-radius: 6px; }
+  .md :global(pre) { background: #8882; padding: 8px; overflow-x: auto; border-radius: 6px; position: relative; }
+  .md :global(.copy-code) {
+    position: absolute; top: 4px; right: 4px; padding: 0 6px;
+    background: none; border: 1px solid #8886; border-radius: 4px;
+    color: inherit; cursor: pointer; opacity: 0.6; font-size: 0.9em;
+  }
+  .md :global(.copy-code:hover) { opacity: 1; }
+  .raw { font-family: ui-monospace, monospace; font-size: 0.9em; }
   .md :global(code) { font-family: ui-monospace, monospace; font-size: 0.9em; }
   .md :global(table) { border-collapse: collapse; }
   .md :global(td), .md :global(th) { border: 1px solid #8886; padding: 4px 8px; }
