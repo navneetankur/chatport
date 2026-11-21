@@ -56,6 +56,9 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] `@path` attachments: server-side text files, chip above the composer once the token is complete.
 - [x] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
 - [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
+- [x] View sent attachments: click the 📎 chip → plain text in a new tab (blob URL); `.md` also gets "rendered" (DOMPurify'd HTML page).
+- [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.
+- [ ] Decide: render markdown in user messages too (same pipeline, raw toggle).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -100,3 +103,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: `--keyfile` replaces `--key`. Cache marker moved to the last user/tool msg; live Haiku 4.5 tool loop: rounds 2–4 each read ~the whole previous prompt from cache (e.g. 10096/10185).
 - 2026-11-21: Config parse now warns on unknown keys via `serde_ignored` (e.g. `bind` placed under `[auth]` → `auth.bind`). Test added.
 - 2026-11-21: OpenRouter app attribution as client default headers (referer = GitHub URL, title, `hidden`, `general-chat`). `hidden` only applies when the app is first created, so never send the referer without it. Not live-tested yet: check the dashboard no longer shows "Unknown".
+- 2026-11-22: Attachment viewer (frontend only, `openText`/`openHtml` in clipboard.ts). Builds; not clicked through in a browser yet.

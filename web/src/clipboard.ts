@@ -24,6 +24,32 @@ export function downloadText(name: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Open `body` in a new tab via a blob URL (gone on reload of that tab). */
+function openBlob(body: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([body], { type }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Show an attachment's text as plain text in a new tab. */
+export function openText(text: string): void {
+  openBlob(text, 'text/plain;charset=utf-8');
+}
+
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** Show already-sanitized HTML (from `renderMarkdown`) as a page in a new tab. */
+export function openHtml(title: string, html: string): void {
+  const page = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>${esc(title)}</title>
+<style>body{max-width:50em;margin:1em auto;padding:0 16px;font-family:sans-serif;line-height:1.5}
+pre{overflow-x:auto;background:#8882;padding:.5em}code{background:#8882}
+table{border-collapse:collapse}td,th{border:1px solid #8886;padding:.2em .5em}
+@media(prefers-color-scheme:dark){body{background:#1b1b1b;color:#ddd}a{color:#8bf}}</style>
+${html}`;
+  openBlob(page, 'text/html;charset=utf-8');
+}
+
 function flash(btn: HTMLElement, label: string) {
   const old = btn.textContent;
   btn.textContent = label;

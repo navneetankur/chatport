@@ -4,7 +4,7 @@
   import type { Attachment, Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
-  import { codeCopy, copyWithFeedback, downloadText } from './clipboard';
+  import { codeCopy, copyWithFeedback, downloadText, openHtml, openText } from './clipboard';
   import Settings from './Settings.svelte';
   import MessageInput from './MessageInput.svelte';
 
@@ -387,7 +387,12 @@
             {:else}
               <div class="text plain">{m.content}</div>
               {#each m.attachments ?? [] as a}
-                <div class="att">📎 {a.name}</div>
+                <div class="att">
+                  <button class="link" title="Open in new tab" onclick={() => openText(a.content)}>📎 {a.name}</button>
+                  {#if /\.(md|markdown)$/i.test(a.name)}
+                    <button class="link" title="Open rendered in new tab" onclick={() => openHtml(a.name, renderMarkdown(a.content))}>rendered</button>
+                  {/if}
+                </div>
               {/each}
             {/if}
           {:else}
@@ -606,6 +611,8 @@
   .md :global(table) { border-collapse: collapse; }
   .md :global(td), .md :global(th) { border: 1px solid #8886; padding: 4px 8px; }
   .meta, .att { font-size: 0.8em; color: #888; margin-top: 4px; }
+  .att .link { background: none; border: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
+  .att .link + .link { margin-left: 0.5em; }
   .meta { display: flex; gap: 8px; align-items: center; }
   .msg.user .meta { justify-content: flex-end; }
   .meta button {
