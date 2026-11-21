@@ -48,10 +48,10 @@ pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
     };
     let mut cfg: Config =
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    if let Ok(k) = std::env::var("OPENROUTER_API_KEY") {
-        if !k.is_empty() {
-            cfg.openrouter_api_key = Some(k);
-        }
+    if let Ok(k) = std::env::var("OPENROUTER_API_KEY")
+        && !k.is_empty()
+    {
+        cfg.openrouter_api_key = Some(k);
     }
     Ok(cfg)
 }

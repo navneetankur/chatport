@@ -80,10 +80,9 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     if let Some(t) = v
         .pointer("/choices/0/delta/content")
         .and_then(Value::as_str)
+        && !t.is_empty()
     {
-        if !t.is_empty() {
-            out.push(ChatEvent::Delta(t.to_string()));
-        }
+        out.push(ChatEvent::Delta(t.to_string()));
     }
     if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
         let n = |p: &str| u.pointer(p).and_then(Value::as_u64).unwrap_or(0);
@@ -100,10 +99,10 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
 #[async_trait]
 impl Provider for OpenRouter {
     async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        if let Some((at, m)) = &*self.models.lock().unwrap() {
-            if at.elapsed() < MODELS_TTL {
-                return Ok(m.clone());
-            }
+        if let Some((at, m)) = &*self.models.lock().unwrap()
+            && at.elapsed() < MODELS_TTL
+        {
+            return Ok(m.clone());
         }
         let v: Value = self
             .http

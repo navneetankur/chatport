@@ -129,7 +129,7 @@ impl Store {
                 Err(err) => tracing::warn!("skipping {}: {err:#}", path.display()),
             }
         }
-        out.sort_by(|a: &Meta, b| b.updated_at.cmp(&a.updated_at));
+        out.sort_by_key(|m: &Meta| std::cmp::Reverse(m.updated_at));
         Ok(out)
     }
 
