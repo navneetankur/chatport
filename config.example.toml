@@ -1,6 +1,14 @@
 bind = "0.0.0.0:8787"
 data_dir = "~/.local/share/chatport"
-# openrouter_api_key = "sk-or-..."   # or env OPENROUTER_API_KEY (env wins)
+# Named API keys; pick one per conversation in chat settings.
+# --key / env OPENROUTER_API_KEY override the default key (or create one named "default").
+# default_key = "personal"   # default: first entry
+# [[keys]]
+# name = "personal"
+# key = "sk-or-..."
+# [[keys]]
+# name = "work"
+# key = "sk-or-..."
 default_model = "openrouter/free"
 
 # OpenRouter `provider` routing object, passed through as-is. Per-conversation override via API.

@@ -45,6 +45,7 @@ type R<T> = Result<T, ApiError>;
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/models", get(models))
+        .route("/api/keys", get(keys))
         .route("/api/conversations", get(list).post(create))
         .route(
             "/api/conversations/{id}",
@@ -59,6 +60,11 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 async fn models(State(s): St) -> R<Json<Value>> {
     Ok(Json(json!(s.provider.list_models().await?)))
+}
+
+/// Key names only, never the keys themselves.
+async fn keys(State(s): St) -> Json<Value> {
+    Json(json!({ "names": s.config.key_names(), "default": s.config.default_key }))
 }
 
 async fn list(State(s): St) -> R<Json<Vec<Meta>>> {
@@ -89,6 +95,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         system: r.system,
         cache: r.cache.unwrap_or_default(),
         reasoning_effort: None,
+        key_name: None,
         leaf: None,
     };
     s.store.put_meta(&meta)?;
@@ -164,6 +171,9 @@ struct PatchReq {
     /// null = back to model default.
     #[serde(default, deserialize_with = "some_option")]
     reasoning_effort: Option<Option<ReasoningEffort>>,
+    /// null = config default key.
+    #[serde(default, deserialize_with = "some_option")]
+    key_name: Option<Option<String>>,
 }
 fn some_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -197,6 +207,14 @@ async fn patch_conv(
     }
     if let Some(e) = r.reasoning_effort {
         meta.reasoning_effort = e;
+    }
+    if let Some(k) = r.key_name {
+        if let Some(name) = &k {
+            s.config
+                .key_for(Some(name))
+                .map_err(|e| bad(&format!("{e:#}")))?;
+        }
+        meta.key_name = k;
     }
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
@@ -342,7 +360,13 @@ fn generate(
     if announce_user {
         let _ = tx.send(ev("user_saved", &user));
     }
+    // A missing key is reported as the reply's error, like any provider failure.
+    let key = s
+        .config
+        .key_for(meta.key_name.as_deref())
+        .map(str::to_string);
     let req = ChatRequest {
+        key: key.as_ref().cloned().unwrap_or_default(),
         model: meta.model.clone(),
         system: meta.system.clone(),
         messages: tree::path(&msgs, &user.id)
@@ -368,7 +392,10 @@ fn generate(
         let mut asst = Message::assistant(user.id.clone(), meta.model.clone());
         let mut done = false;
         let started = tokio::select! {
-            r = s.provider.stream_chat(req) => Some(r),
+            r = async {
+                key?;
+                s.provider.stream_chat(req).await
+            } => Some(r),
             _ = &mut cancel => None,
         };
         match started {

@@ -47,7 +47,7 @@ fn parse_args() -> Result<Args> {
                 println!(
                     "usage: chatport [--config PATH] [--key KEY]\n  \
                      config default: ~/.config/chatport/config.toml\n  \
-                     key priority: --key > OPENROUTER_API_KEY > config"
+                     --key / OPENROUTER_API_KEY override the default config key"
                 );
                 std::process::exit(0);
             }
@@ -66,16 +66,23 @@ async fn main() -> Result<()> {
         .init();
 
     let args = parse_args()?;
-    let cfg = config::load(args.config)?;
-    let key = args
+    let mut cfg = config::load(args.config)?;
+    let override_key = args
         .key
         .filter(|k| !k.is_empty())
-        .or_else(|| cfg.openrouter_api_key.clone())
-        .context("no API key: use --key, OPENROUTER_API_KEY, or openrouter_api_key in config")?;
+        .or_else(|| std::env::var("OPENROUTER_API_KEY").ok());
+    cfg.resolve_keys(override_key)?;
+    tracing::info!(
+        "API keys: {:?} (default {:?})",
+        cfg.key_names(),
+        cfg.default_key.as_deref().unwrap_or_default()
+    );
     let store = store::Store::open(config::expand_tilde(&cfg.data_dir))?;
     let state = Arc::new(AppState {
         store,
-        provider: Arc::new(provider::openrouter::OpenRouter::new(key)),
+        provider: Arc::new(provider::openrouter::OpenRouter::new(
+            cfg.key_for(None)?.to_string(),
+        )),
         config: cfg.clone(),
         running: Default::default(),
     });

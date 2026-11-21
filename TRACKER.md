@@ -28,6 +28,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Message meta row: ‹n/m›, ↻ regen / ✎ edit icons, short line (model w/o vendor · cost), ⓘ toggles details (model, requested, provider, tokens, cost, time).
 - Reasoning: `delta.reasoning` → `ChatEvent::Reasoning` → message `reasoning` (stored, never sent back as context), SSE `reasoning {text}`. UI: collapsible "Thinking" block (open while thinking). `usage.reasoning_tokens` (part of completion) shown in details.
 - Reasoning effort: `meta.reasoning_effort` (enum max…none, unset = model default) → body `reasoning: {effort}`. Settings dropdown. PATCH `null` clears. Note: some models reject `none` with a 400 (reasoning mandatory) — surfaced as reply error, deliberately not auto-handled.
+- API keys: config `[[keys]] {name, key}` + `default_key` (default: first). `--key`/env override the default key only (or create "default"). `Config::resolve_keys` at startup, `key_for(name)` per request. `meta.key_name` (None = default) → `ChatRequest.key`; missing key = reply error. `GET /api/keys` returns names only. `/api/models` uses the default key. Settings shows a picker only when >1 key.
 - `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
@@ -42,6 +43,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
 - [x] New conversations default to `provider.data_collection: "deny"` (unless request/config sets it). Existing convs not migrated. Verified `openrouter/free` still routes with deny.
 - [x] Per-message copy / download (.md, `<title-slug>-<msg-id>.md`) for user + assistant; raw-markdown toggle on assistant msgs (not persisted); copy button on code blocks. Reasoning excluded. Clipboard falls back to execCommand on plain-HTTP LAN.
+- [x] Multiple named API keys in config, picked per conversation in settings (switchable mid-chat).
 - [ ] Code blocks: syntax highlighting (highlight.js).
 
 ## Deferred (not needed)
@@ -76,3 +78,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Header shows `· <effort> effort` when set.
 - 2026-11-21: Phone layout: ☰ in header opens sidebar as slide-over (<640px), closes on open/new chat/backdrop. Header totals hidden on phone.
 - 2026-11-21: Copy/download/raw toggle + code-block copy (web/src/clipboard.ts). Builds clean; not yet clicked through in a browser.
+- 2026-11-21: Named API keys (`openrouter_api_key` removed, no compat). Live: default key OK, switching to a bogus key → 401 reply error, PATCH to an unknown name → 400. Picker not yet clicked in a browser.

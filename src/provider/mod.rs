@@ -58,6 +58,8 @@ pub struct ChatMessage {
 
 #[derive(Clone, Debug)]
 pub struct ChatRequest {
+    /// API key to bill this request to.
+    pub key: String,
     pub model: String,
     pub system: Option<String>,
     pub messages: Vec<ChatMessage>,

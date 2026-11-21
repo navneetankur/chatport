@@ -40,7 +40,9 @@ chatport/
 ```toml
 bind = "0.0.0.0:8787"
 data_dir = "~/.local/share/chatport"
-openrouter_api_key = "..."        # or env OPENROUTER_API_KEY (env wins)
+[[keys]]                          # named keys, picked per conversation
+name = "personal"                 # --key / OPENROUTER_API_KEY override the default key
+key = "..."
 default_model = "anthropic/claude-sonnet-4.5"
 
 [default_provider]                # OpenRouter `provider` object, passed through

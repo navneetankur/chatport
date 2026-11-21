@@ -10,6 +10,7 @@ const BASE: &str = "https://openrouter.ai/api/v1";
 const MODELS_TTL: Duration = Duration::from_secs(3600);
 
 pub struct OpenRouter {
+    /// Used for model listing only; chat requests carry their own key.
     key: String,
     http: reqwest::Client,
     models: Mutex<Option<(Instant, Vec<ModelInfo>)>>,
@@ -155,7 +156,7 @@ impl Provider for OpenRouter {
         let resp = self
             .http
             .post(format!("{BASE}/chat/completions"))
-            .bearer_auth(&self.key)
+            .bearer_auth(&req.key)
             .header("X-Title", "chatport")
             .json(&build_body(&req))
             .send()
@@ -230,6 +231,7 @@ mod tests {
 
     fn req(model: &str, cache: CachePolicy) -> ChatRequest {
         ChatRequest {
+            key: String::new(),
             model: model.into(),
             system: Some("sys".into()),
             messages: vec![

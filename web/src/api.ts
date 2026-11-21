@@ -42,6 +42,7 @@ export interface Meta {
   system?: string;
   cache: 'auto' | 'off';
   reasoning_effort?: ReasoningEffort | null;
+  key_name?: string | null;
   leaf?: string | null;
 }
 
@@ -141,6 +142,9 @@ export interface ModelInfo {
 
 export const listModels = () => fetch('/api/models').then((r) => json<ModelInfo[]>(r));
 
+export const listKeys = () =>
+  fetch('/api/keys').then((r) => json<{ names: string[]; default: string }>(r));
+
 export type MetaPatch = Partial<{
   title: string;
   model: string;
@@ -148,6 +152,7 @@ export type MetaPatch = Partial<{
   system: string; // "" clears
   cache: 'auto' | 'off';
   reasoning_effort: ReasoningEffort | null; // null = model default
+  key_name: string | null; // null = config default
 }>;
 
 export const patchConversation = (id: string, patch: MetaPatch) =>

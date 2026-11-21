@@ -17,6 +17,8 @@
   let cache = $state(init.cache);
   let effort = $state<ReasoningEffort | ''>(init.reasoning_effort ?? '');
   let provText = $state(init.provider ? JSON.stringify(init.provider, null, 2) : '');
+  let keyName = $state(init.key_name ?? '');
+  let keys = $state<{ names: string[]; default: string }>({ names: [], default: '' });
   let models = $state<ModelInfo[]>([]);
   let error = $state('');
   let saving = $state(false);
@@ -64,6 +66,7 @@
         system,
         cache,
         reasoning_effort: effort || null,
+        key_name: keyName || null,
         provider: Object.keys(prov).length ? prov : null,
       });
       onsaved(m);
@@ -76,6 +79,7 @@
   }
 
   onMount(async () => {
+    api.listKeys().then((k) => (keys = k), (e) => (error = `Loading keys: ${e}`));
     try {
       models = (await api.listModels()).sort((a, b) => a.id.localeCompare(b.id));
     } catch (e) {
@@ -99,6 +103,21 @@
       <small class="warn">Unknown model id</small>
     {/if}
   </label>
+
+  {#if keys.names.length > 1 || (keyName && !keys.names.includes(keyName))}
+    <label>
+      API key
+      <select bind:value={keyName}>
+        <option value="">default ({keys.default})</option>
+        {#each keys.names as n}
+          <option value={n}>{n}</option>
+        {/each}
+        {#if keyName && !keys.names.includes(keyName)}
+          <option value={keyName}>{keyName} (missing)</option>
+        {/if}
+      </select>
+    </label>
+  {/if}
 
   <label>
     System prompt
