@@ -44,7 +44,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 ## Deferred (not needed)
 - Auto-title after first reply.
 - [ ] Guard against two concurrent generations in one conversation (currently allowed; both save fine, last one wins leaf).
-- [ ] Tidy: `store` uses blocking std fs inside async handlers — fine at this scale, revisit only if it matters.
+- Won't do (by choice): `store` uses blocking std fs from async handlers. Ops are tiny (small meta.json, one-line appends), single user — accepted practice. `tokio::fs` is just spawn_blocking per call, gains nothing. If it ever matters: keep `Store` sync, wrap handler calls in `tokio::task::spawn_blocking` (std Mutex stays fine — never held across `.await`).
 
 ## Decisions log
 - Separate service from remotecontrol server (independent restarts/failures).
