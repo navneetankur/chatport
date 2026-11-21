@@ -69,6 +69,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - No index.json: list = scan `meta.json` files.
 - Branching = message tree via `parent_id` in one file (not file-per-branch).
 - Attachments: text/md only, inline in message. Images later → `attachments/<hash>` refs.
+- App attribution headers on every request, created hidden (no public rankings).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
 
@@ -98,3 +99,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: File tools. Live (Gemini 3.8 Flash, scratch root): list → read → edit → create in 5 rounds, diffs stored; follow-up rebuilt history from rounds; `../` refused and reported to the model; tools-off follow-up used folded history. 25 tests pass. UI typechecks, not seen in a browser.
 - 2026-11-21: `--keyfile` replaces `--key`. Cache marker moved to the last user/tool msg; live Haiku 4.5 tool loop: rounds 2–4 each read ~the whole previous prompt from cache (e.g. 10096/10185).
 - 2026-11-21: Config parse now warns on unknown keys via `serde_ignored` (e.g. `bind` placed under `[auth]` → `auth.bind`). Test added.
+- 2026-11-21: OpenRouter app attribution as client default headers (referer = GitHub URL, title, `hidden`, `general-chat`). `hidden` only applies when the app is first created, so never send the referer without it. Not live-tested yet: check the dashboard no longer shows "Unknown".

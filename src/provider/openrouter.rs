@@ -9,6 +9,28 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 const BASE: &str = "https://openrouter.ai/api/v1";
 const MODELS_TTL: Duration = Duration::from_secs(3600);
 
+/// App attribution, sent on every request. `hidden` only takes effect on the
+/// request that first creates the app on OpenRouter, so it must always be sent
+/// together with the referer. Names are lowercase as `from_static` requires.
+const ATTRIBUTION_HEADERS: [(&str, &str); 4] = [
+    ("http-referer", "https://github.com/navneetankur/chatport"),
+    ("x-openrouter-title", "chatport"),
+    ("x-openrouter-app-visibility", "hidden"),
+    ("x-openrouter-categories", "general-chat"),
+];
+
+fn attribution_headers() -> reqwest::header::HeaderMap {
+    return ATTRIBUTION_HEADERS
+        .iter()
+        .map(|(k, v)| {
+            (
+                reqwest::header::HeaderName::from_static(k),
+                reqwest::header::HeaderValue::from_static(v),
+            )
+        })
+        .collect();
+}
+
 pub struct OpenRouter {
     /// Used for model listing only; chat requests carry their own key.
     key: String,
@@ -17,12 +39,16 @@ pub struct OpenRouter {
 }
 
 impl OpenRouter {
-    pub fn new(key: String) -> Self {
-        Self {
+    pub fn new(key: String) -> Result<Self> {
+        let http = reqwest::Client::builder()
+            .default_headers(attribution_headers())
+            .build()
+            .context("building HTTP client")?;
+        return Ok(Self {
             key,
-            http: reqwest::Client::new(),
+            http,
             models: Mutex::new(None),
-        }
+        });
     }
 }
 
@@ -213,7 +239,6 @@ impl Provider for OpenRouter {
             .http
             .post(format!("{BASE}/chat/completions"))
             .bearer_auth(&req.key)
-            .header("X-Title", "chatport")
             .json(&build_body(&req))
             .send()
             .await?;
@@ -284,6 +309,18 @@ impl Provider for OpenRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attribution_headers_all_present() {
+        let h = attribution_headers();
+        assert_eq!(
+            h["HTTP-Referer"],
+            "https://github.com/navneetankur/chatport"
+        );
+        assert_eq!(h["X-OpenRouter-Title"], "chatport");
+        assert_eq!(h["X-OpenRouter-App-Visibility"], "hidden");
+        assert_eq!(h["X-OpenRouter-Categories"], "general-chat");
+    }
 
     fn req(model: &str, cache: CachePolicy) -> ChatRequest {
         ChatRequest {

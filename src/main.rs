@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
         store,
         provider: Arc::new(provider::openrouter::OpenRouter::new(
             cfg.key_for(None)?.to_string(),
-        )),
+        )?),
         config: cfg.clone(),
         running: Default::default(),
     });
