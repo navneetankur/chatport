@@ -24,6 +24,19 @@ pub enum CachePolicy {
     Off,
 }
 
+/// Reasoning effort (OpenRouter `reasoning.effort`). Unset = model default.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Max,
+    Xhigh,
+    High,
+    Medium,
+    Low,
+    Minimal,
+    None,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Usage {
     pub prompt_tokens: u64,
@@ -51,6 +64,7 @@ pub struct ChatRequest {
     /// Provider-specific options (OpenRouter: the `provider` routing object).
     pub options: Option<Value>,
     pub cache: CachePolicy,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug)]

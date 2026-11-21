@@ -59,6 +59,9 @@ pub fn build_body(req: &ChatRequest) -> Value {
     if let Some(p) = req.options.as_ref().filter(|p| !p.is_null()) {
         body["provider"] = p.clone();
     }
+    if let Some(e) = req.reasoning_effort {
+        body["reasoning"] = json!({ "effort": e });
+    }
     body
 }
 
@@ -245,6 +248,7 @@ mod tests {
             ],
             options: Some(json!({ "order": ["anthropic"] })),
             cache,
+            reasoning_effort: None,
         }
     }
 
@@ -256,6 +260,14 @@ mod tests {
         assert!(m[1]["content"].is_string());
         assert!(m[3]["content"][0]["cache_control"].is_object());
         assert_eq!(b["provider"]["order"][0], "anthropic");
+    }
+
+    #[test]
+    fn reasoning_effort_only_when_set() {
+        let mut r = req("x/y", CachePolicy::Off);
+        assert!(build_body(&r).get("reasoning").is_none());
+        r.reasoning_effort = Some(ReasoningEffort::Xhigh);
+        assert_eq!(build_body(&r)["reasoning"], json!({ "effort": "xhigh" }));
     }
 
     #[test]

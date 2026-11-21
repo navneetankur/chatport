@@ -29,6 +29,9 @@ export interface Message {
   created_at: number;
 }
 
+export const EFFORTS = ['max', 'xhigh', 'high', 'medium', 'low', 'minimal', 'none'] as const;
+export type ReasoningEffort = (typeof EFFORTS)[number];
+
 export interface Meta {
   id: string;
   title: string;
@@ -38,6 +41,7 @@ export interface Meta {
   provider?: unknown;
   system?: string;
   cache: 'auto' | 'off';
+  reasoning_effort?: ReasoningEffort | null;
   leaf?: string | null;
 }
 
@@ -143,6 +147,7 @@ export type MetaPatch = Partial<{
   provider: unknown; // null clears
   system: string; // "" clears
   cache: 'auto' | 'off';
+  reasoning_effort: ReasoningEffort | null; // null = model default
 }>;
 
 export const patchConversation = (id: string, patch: MetaPatch) =>

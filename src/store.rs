@@ -3,7 +3,7 @@
 //! data_dir/conversations/<id>/meta.json      mutable settings, rewritten atomically
 //! data_dir/conversations/<id>/messages.jsonl append-only message tree
 
-use crate::provider::{CachePolicy, Role, Usage};
+use crate::provider::{CachePolicy, ReasoningEffort, Role, Usage};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,6 +36,8 @@ pub struct Meta {
     pub system: Option<String>,
     #[serde(default)]
     pub cache: CachePolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
     /// Currently shown branch tip. None = last appended message.
     #[serde(default)]
     pub leaf: Option<String>,

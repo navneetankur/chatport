@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::provider::{CachePolicy, ChatEvent, ChatMessage, ChatRequest, Role};
+use crate::provider::{CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role};
 use crate::store::{Attachment, Message, Meta, new_id, now_ms};
 use crate::tree;
 use axum::extract::{Path, State};
@@ -86,6 +86,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         provider: r.provider.or_else(|| s.config.default_provider.clone()),
         system: r.system,
         cache: r.cache.unwrap_or_default(),
+        reasoning_effort: None,
         leaf: None,
     };
     s.store.put_meta(&meta)?;
@@ -148,6 +149,14 @@ struct PatchReq {
     provider: Option<Value>,
     system: Option<String>,
     cache: Option<CachePolicy>,
+    /// null = back to model default.
+    #[serde(default, deserialize_with = "some_option")]
+    reasoning_effort: Option<Option<ReasoningEffort>>,
+}
+fn some_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(d).map(Some)
 }
 fn some_value<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
     Value::deserialize(d).map(Some)
@@ -173,6 +182,9 @@ async fn patch_conv(
     }
     if let Some(c) = r.cache {
         meta.cache = c;
+    }
+    if let Some(e) = r.reasoning_effort {
+        meta.reasoning_effort = e;
     }
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
@@ -331,6 +343,7 @@ fn generate(
             .collect(),
         options: meta.provider.clone(),
         cache: meta.cache,
+        reasoning_effort: meta.reasoning_effort,
     };
     let conv_id = meta.id.clone();
     let gen_id = new_id();

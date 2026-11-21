@@ -27,6 +27,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Actual model: `ChatEvent::Model` from chunk `model` (deduped in provider task) → assistant `model`; `requested_model` set only when it differs. SSE `model {model}` event. Also `provider` from chunks → `provider_name` (SSE `provider` event).
 - Message meta row: ‹n/m›, ↻ regen / ✎ edit icons, short line (model w/o vendor · cost), ⓘ toggles details (model, requested, provider, tokens, cost, time).
 - Reasoning: `delta.reasoning` → `ChatEvent::Reasoning` → message `reasoning` (stored, never sent back as context), SSE `reasoning {text}`. UI: collapsible "Thinking" block (open while thinking). `usage.reasoning_tokens` (part of completion) shown in details.
+- Reasoning effort: `meta.reasoning_effort` (enum max…none, unset = model default) → body `reasoning: {effort}`. Settings dropdown. PATCH `null` clears. Note: some models reject `none` with a 400 (reasoning mandatory) — surfaced as reply error, deliberately not auto-handled.
 - `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
@@ -66,3 +67,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Record actual model. Live: `openrouter/free` → `nvidia/nemotron-3.5-super-vl:free`, requested_model kept. Remaining backlog: Haiku cache-hit check.
 - 2026-11-21: Provider name captured from stream; compact meta row + details toggle. Live: openrouter/free → baidu/ernie-5.5-flash-preview:free via Baidu. Not yet seen in a browser.
 - 2026-11-21: Reasoning text + reasoning token count. Also added the missing provider parse test (last round's test edit silently didn't apply).
+- 2026-11-21: Reasoning effort setting. Live: bad value → 422; `none` on ernie-5.5-flash → OpenRouter 400 (mandatory reasoning), `high` OK. Capture in bigfiles/openrouter-stream-effort-high.sse.

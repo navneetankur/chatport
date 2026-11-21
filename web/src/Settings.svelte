@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import * as api from './api';
-  import type { Meta, ModelInfo } from './api';
+  import { EFFORTS } from './api';
+  import type { Meta, ModelInfo, ReasoningEffort } from './api';
 
   let { meta, onsaved, onclose }: {
     meta: Meta;
@@ -14,6 +15,7 @@
   let model = $state(init.model);
   let system = $state(init.system ?? '');
   let cache = $state(init.cache);
+  let effort = $state<ReasoningEffort | ''>(init.reasoning_effort ?? '');
   let provText = $state(init.provider ? JSON.stringify(init.provider, null, 2) : '');
   let models = $state<ModelInfo[]>([]);
   let error = $state('');
@@ -61,6 +63,7 @@
         model: model.trim(),
         system,
         cache,
+        reasoning_effort: effort || null,
         provider: Object.keys(prov).length ? prov : null,
       });
       onsaved(m);
@@ -100,6 +103,16 @@
   <label>
     System prompt
     <textarea rows="5" bind:value={system}></textarea>
+  </label>
+
+  <label>
+    Reasoning effort
+    <select bind:value={effort}>
+      <option value="">model default</option>
+      {#each EFFORTS as e}
+        <option value={e}>{e}</option>
+      {/each}
+    </select>
   </label>
 
   <label class="row">
