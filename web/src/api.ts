@@ -164,7 +164,16 @@ export interface ModelInfo {
   pricing?: { prompt?: string; completion?: string };
 }
 
-export const listModels = () => fetch('/api/models').then((r) => json<ModelInfo[]>(r));
+let modelsCache: Promise<ModelInfo[]> | null = null;
+
+/** Fetched once per page load; a failed fetch is not cached. */
+export function listModels(): Promise<ModelInfo[]> {
+  if (!modelsCache) {
+    modelsCache = fetch('/api/models').then((r) => json<ModelInfo[]>(r));
+    modelsCache.catch(() => (modelsCache = null));
+  }
+  return modelsCache;
+}
 
 export const listKeys = () =>
   fetch('/api/keys').then((r) => json<{ names: string[]; default: string }>(r));

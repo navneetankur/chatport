@@ -19,7 +19,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - UI: `App.svelte` (all views), `api.ts` (fetch + SSE reader over POST), `tree.ts` (`pathTo`), `markdown.ts` (marked + DOMPurify). Open conv in URL hash.
 - Branching UI: `siblings()` in tree.ts; all streaming goes through `run()` in App.svelte (send / edit / regenerate). Switch = `POST /leaf` with the sibling id → server returns its latest descendant.
 - SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
-- Settings: `Settings.svelte` (⚙ in header). Raw provider JSON is the source of truth; form fields write through it. Model picker = `<input list>` + datalist from `/api/models`. Header shows branch totals (tokens/cost).
+- Settings: `Settings.svelte` (⚙ in header). Raw provider JSON is the source of truth; form fields write through it. Model picker = `ModelPicker.svelte` (custom dropdown, word-wise search in `modelSearch.ts`: every word must match id or name; exact id, then id prefix first; max 100 shown). Model list fetched once per page load (`api.listModels` memoised); server also caches 1h. Header shows branch totals (tokens/cost).
 - Stop: `AppState.running` = conv id -> (gen id, oneshot). Generation `select!`s on it; stopped reply saved `partial` with no error. Newer generation replaces the handle; finisher removes only its own.
 - Attachments: 📎 in composer reads .txt/.md client-side (2 MB cap), chips removable; edit re-sends the original attachments.
 - Title: server sets it on the first message of a "New chat" (`api::title_from`: first non-empty line → attachment name → conv id, 20 chars + …). Rename: ✎ in sidebar (or dbl-click) → PATCH title.

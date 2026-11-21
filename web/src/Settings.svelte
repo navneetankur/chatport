@@ -3,6 +3,7 @@
   import * as api from './api';
   import { EFFORTS } from './api';
   import type { Meta, ModelInfo, ReasoningEffort } from './api';
+  import ModelPicker from './ModelPicker.svelte';
 
   let { meta, onsaved, onclose }: {
     meta: Meta;
@@ -95,12 +96,7 @@
 <div class="panel">
   <label>
     Model
-    <input list="models" bind:value={model} placeholder="vendor/model" />
-    <datalist id="models">
-      {#each models as m (m.id)}
-        <option value={m.id}>{m.name} {price(m)}</option>
-      {/each}
-    </datalist>
+    <ModelPicker {models} bind:value={model} {price} />
     {#if selected}
       <small>{selected.name} · {selected.context_length ?? '?'} ctx · {price(selected)}</small>
     {:else if models.length && model}
