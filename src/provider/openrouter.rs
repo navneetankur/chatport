@@ -88,6 +88,13 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
         out.push(ChatEvent::Provider(p.to_string()));
     }
     if let Some(t) = v
+        .pointer("/choices/0/delta/reasoning")
+        .and_then(Value::as_str)
+        && !t.is_empty()
+    {
+        out.push(ChatEvent::Reasoning(t.to_string()));
+    }
+    if let Some(t) = v
         .pointer("/choices/0/delta/content")
         .and_then(Value::as_str)
         && !t.is_empty()
@@ -100,6 +107,7 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
             prompt_tokens: n("/prompt_tokens"),
             completion_tokens: n("/completion_tokens"),
             cached_tokens: n("/prompt_tokens_details/cached_tokens"),
+            reasoning_tokens: n("/completion_tokens_details/reasoning_tokens"),
             cost: u.get("cost").and_then(Value::as_f64),
         }));
     }
@@ -271,15 +279,22 @@ mod tests {
     fn parses_delta_usage_done_error() {
         let ev = parse_chunk(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
         assert!(matches!(&ev[0], ChatEvent::Delta(t) if t == "hi"));
-        let ev = parse_chunk(r#"{"model":"x/y","choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
-        assert!(matches!(&ev[0], ChatEvent::Model(m) if m == "x/y"));
-        assert!(matches!(&ev[1], ChatEvent::Delta(t) if t == "hi"));
         let ev = parse_chunk(
-            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"cost":0.01}}"#,
+            r#"{"model":"x/y","provider":"Nvidia","choices":[{"delta":{"content":"hi"}}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Model(m) if m == "x/y"));
+        assert!(matches!(&ev[1], ChatEvent::Provider(p) if p == "Nvidia"));
+        assert!(matches!(&ev[2], ChatEvent::Delta(t) if t == "hi"));
+        let ev =
+            parse_chunk(r#"{"choices":[{"delta":{"content":"","reasoning":"hmm"}}]}"#).unwrap();
+        assert!(matches!(&ev[..], [ChatEvent::Reasoning(t)] if t == "hmm"));
+        let ev = parse_chunk(
+            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"completion_tokens_details":{"reasoning_tokens":1},"cost":0.01}}"#,
         )
         .unwrap();
         assert!(
-            matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.cost == Some(0.01))
+            matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.reasoning_tokens == 1 && u.cost == Some(0.01))
         );
         assert!(matches!(parse_chunk("[DONE]").unwrap()[0], ChatEvent::Done));
         assert!(parse_chunk(r#"{"error":{"message":"nope"}}"#).is_err());

@@ -205,6 +205,9 @@
           case 'provider':
             if (streaming) streaming.provider_name = e.data.provider;
             break;
+          case 'reasoning':
+            if (streaming) streaming.reasoning = (streaming.reasoning ?? '') + e.data.text;
+            break;
           case 'delta':
             if (streaming) streaming.content += e.data.text;
             break;
@@ -251,7 +254,13 @@
       ['Model', m.model],
       ['Requested', m.requested_model],
       ['Provider', m.provider_name],
-      ['Tokens', u && `${u.prompt_tokens} in · ${u.completion_tokens} out` + (u.cached_tokens ? ` · ${u.cached_tokens} cached` : '')],
+      [
+        'Tokens',
+        u &&
+          `${u.prompt_tokens} in · ${u.completion_tokens} out` +
+            (u.reasoning_tokens ? ` (${u.reasoning_tokens} reasoning)` : '') +
+            (u.cached_tokens ? ` · ${u.cached_tokens} cached` : ''),
+      ],
       ['Cost', u?.cost != null ? `$${u.cost.toFixed(6)}` : undefined],
       ['Time', new Date(m.created_at).toLocaleString()],
     ];
@@ -332,6 +341,12 @@
               <div class="att">📎 {a.name}</div>
             {/each}
           {:else}
+            {#if m.reasoning}
+              <details class="thinking" open={m === streaming && !m.content}>
+                <summary>{m === streaming && !m.content ? 'Thinking…' : 'Thinking'}</summary>
+                <div class="plain">{m.reasoning}</div>
+              </details>
+            {/if}
             <div class="text md">{@html renderMarkdown(m.content)}</div>
             {#if m.partial && !m.error && m !== streaming}<div class="att">(stopped)</div>{/if}
             {#if m.error}<div class="err">⚠ {m.error}</div>{/if}
@@ -534,6 +549,15 @@
     border-left: 2px solid var(--border);
   }
   .details dt { font-weight: 600; }
+  .thinking {
+    font-size: 0.85em;
+    color: #888;
+    border-left: 2px solid var(--border);
+    padding: 2px 10px;
+    margin-bottom: 8px;
+  }
+  .thinking summary { cursor: pointer; user-select: none; }
+  .thinking .plain { margin-top: 4px; max-height: 40vh; overflow-y: auto; }
   .details dd { margin: 0; overflow-wrap: anywhere; }
   .edit { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }

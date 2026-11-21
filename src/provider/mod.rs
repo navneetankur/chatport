@@ -30,6 +30,9 @@ pub struct Usage {
     pub completion_tokens: u64,
     #[serde(default)]
     pub cached_tokens: u64,
+    /// Part of `completion_tokens` spent on reasoning.
+    #[serde(default)]
+    pub reasoning_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
 }
@@ -57,6 +60,8 @@ pub enum ChatEvent {
     /// Upstream provider serving the request (e.g. "Nvidia").
     Provider(String),
     Delta(String),
+    /// Reasoning ("thinking") text, streamed before/alongside the answer.
+    Reasoning(String),
     Usage(Usage),
     Done,
 }

@@ -4,6 +4,7 @@ export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   cached_tokens: number;
+  reasoning_tokens?: number;
   cost?: number;
 }
 
@@ -17,6 +18,7 @@ export interface Message {
   parent_id: string | null;
   role: Role;
   content: string;
+  reasoning?: string;
   attachments?: Attachment[];
   model?: string;
   requested_model?: string;
@@ -68,6 +70,7 @@ export type StreamEvent =
   | { event: 'model'; data: { model: string } }
   | { event: 'provider'; data: { provider: string } }
   | { event: 'delta'; data: { text: string } }
+  | { event: 'reasoning'; data: { text: string } }
   | { event: 'usage'; data: Usage }
   | { event: 'error'; data: { message: string } }
   | { event: 'done'; data: Message };

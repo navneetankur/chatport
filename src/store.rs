@@ -53,6 +53,9 @@ pub struct Message {
     pub parent_id: Option<String>,
     pub role: Role,
     pub content: String,
+    /// Model's reasoning text (assistant only). Shown in the UI, never sent back as context.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reasoning: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<Attachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,6 +83,7 @@ impl Message {
             parent_id,
             role: Role::User,
             content,
+            reasoning: String::new(),
             attachments,
             model: None,
             requested_model: None,

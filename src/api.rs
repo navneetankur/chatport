@@ -367,6 +367,10 @@ fn generate(
                         let _ = tx.send(ev("provider", json!({ "provider": &p })));
                         asst.provider_name = Some(p);
                     }
+                    Ok(ChatEvent::Reasoning(t)) => {
+                        asst.reasoning.push_str(&t);
+                        let _ = tx.send(ev("reasoning", json!({ "text": t })));
+                    }
                     Ok(ChatEvent::Delta(t)) => {
                         asst.content.push_str(&t);
                         let _ = tx.send(ev("delta", json!({ "text": t })));
