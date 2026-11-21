@@ -137,14 +137,35 @@ pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
         Err(e) if !required && e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
+    let (cfg, unknown) = parse(&text).with_context(|| format!("parsing {}", path.display()))?;
+    for key in unknown {
+        tracing::warn!("{}: unknown config key `{key}` (ignored)", path.display());
+    }
+    return Ok(cfg);
+}
+
+/// Parse config text, returning the paths of keys serde skipped (e.g. `auth.bind`).
+fn parse(text: &str) -> Result<(Config, Vec<String>)> {
+    let mut unknown = Vec::new();
+    let de = toml::Deserializer::new(text);
     let cfg: Config =
-        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(cfg)
+        serde_ignored::deserialize(de, |p| unknown.push(p.to_string().replace(".?", "")))?;
+    return Ok((cfg, unknown));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_keys_reported() {
+        let (cfg, unknown) =
+            parse("[auth]\nuser = \"u\"\npassword = \"p\"\nbind = \"0.0.0.0:1\"\n").unwrap();
+        assert!(cfg.auth.is_some());
+        assert_eq!(unknown, vec!["auth.bind".to_string()]);
+        let (_, none) = parse("bind = \"0.0.0.0:1\"\n").unwrap();
+        assert!(none.is_empty());
+    }
 
     fn cfg(toml_text: &str) -> Config {
         toml::from_str(toml_text).unwrap()

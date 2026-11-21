@@ -97,3 +97,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Extracted MessageInput.svelte; edit now has 📎, `@` mentions and Enter-to-send. Not clicked through in a browser yet.
 - 2026-11-21: File tools. Live (Gemini 3.8 Flash, scratch root): list → read → edit → create in 5 rounds, diffs stored; follow-up rebuilt history from rounds; `../` refused and reported to the model; tools-off follow-up used folded history. 25 tests pass. UI typechecks, not seen in a browser.
 - 2026-11-21: `--keyfile` replaces `--key`. Cache marker moved to the last user/tool msg; live Haiku 4.5 tool loop: rounds 2–4 each read ~the whole previous prompt from cache (e.g. 10096/10185).
+- 2026-11-21: Config parse now warns on unknown keys via `serde_ignored` (e.g. `bind` placed under `[auth]` → `auth.bind`). Test added.
