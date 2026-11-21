@@ -4,6 +4,7 @@
   import { tick, untrack, type Snippet } from 'svelte';
   import * as api from './api';
   import type { Attachment, FsEntry } from './api';
+  import { emacsKey } from './emacsKeys';
   import { completion, mentions, typingAt, type Typing } from './mentions';
 
   let {
@@ -160,7 +161,9 @@
       e.preventDefault();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    if (textarea && emacsKey(e, textarea)) {
+      updateComp();
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       submit();
     } else if (e.key === 'Escape' && oncancel) {
