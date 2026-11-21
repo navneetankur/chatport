@@ -11,3 +11,8 @@ export function pathTo(messages: Message[], leaf: string | null): Message[] {
   }
   return out.reverse();
 }
+
+/** Messages sharing `m`'s parent (incl. `m`), in append order. */
+export function siblings(messages: Message[], m: Message): Message[] {
+  return messages.filter((x) => x.parent_id === m.parent_id && x.role === m.role);
+}

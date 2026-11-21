@@ -104,3 +104,15 @@ export const sendMessage = (
   content: string,
   on: (e: StreamEvent) => void,
 ) => streamPost(`/api/conversations/${id}/messages`, { parent_id, content }, on);
+
+export const regenerate = (id: string, user_id: string, on: (e: StreamEvent) => void) =>
+  streamPost(`/api/conversations/${id}/regenerate`, { user_id }, on);
+
+export async function setLeaf(id: string, msgId: string): Promise<string> {
+  const r = await fetch(`/api/conversations/${id}/leaf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: msgId }),
+  });
+  return (await json<{ leaf: string }>(r)).leaf;
+}
