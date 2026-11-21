@@ -1,13 +1,12 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import * as api from './api';
   import type { Attachment, Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
   import { codeCopy, copyWithFeedback, downloadText } from './clipboard';
   import Settings from './Settings.svelte';
-  import { completion, mentions, typingAt, type Typing } from './mentions';
-  import type { FsEntry } from './api';
+  import MessageInput from './MessageInput.svelte';
 
   let convs = $state<Meta[]>([]);
   let current = $state<Meta | null>(null);
@@ -113,128 +112,18 @@
   }
 
   let attachments = $state<Attachment[]>([]);
-  let fileInput: HTMLInputElement | undefined = $state();
 
-  async function addFiles(files: FileList | null) {
-    for (const f of files ?? []) {
-      if (f.size > 2_000_000) {
-        error = `${f.name}: too large (max 2 MB)`;
-        continue;
-      }
-      attachments.push({ name: f.name, content: await f.text() });
-    }
-    if (fileInput) fileInput.value = '';
-  }
-
-  // `@path` mentions: resolved on the server once the token is complete
-  // (followed by whitespace, or closing quote), shown as chips above the input.
-  type AtFile = { status: 'loading' } | { status: 'ok'; att: Attachment } | { status: 'err'; msg: string };
-  let atFiles = $state<Record<string, AtFile>>({});
-  /** Mentions whose chip was removed with ×; not re-attached while in the text. */
-  let atDismissed = $state<string[]>([]);
-
-  function resolveAt(path: string): Promise<void> {
-    atFiles[path] = { status: 'loading' };
-    return api.fetchFile(current?.id, path).then(
-      (att) => {
-        if (atFiles[path]) atFiles[path] = { status: 'ok', att };
-      },
-      (e) => {
-        if (atFiles[path]) atFiles[path] = { status: 'err', msg: e instanceof Error ? e.message : String(e) };
-      },
-    );
-  }
-
-  // Depends on `input` only; chip state is read/written untracked.
-  $effect(() => {
-    const present = mentions(input, true);
-    const complete = mentions(input, false);
-    untrack(() => {
-      for (const k of Object.keys(atFiles)) if (!present.includes(k)) delete atFiles[k];
-      if (atDismissed.some((k) => !present.includes(k))) atDismissed = atDismissed.filter((k) => present.includes(k));
-      for (const p of complete) if (!(p in atFiles) && !atDismissed.includes(p)) resolveAt(p);
-    });
-  });
-
-  // `@` autocomplete: debounced listing of the directory being typed.
-  let textarea: HTMLTextAreaElement | undefined = $state();
-  let comp = $state<{ typing: Typing; items: FsEntry[]; sel: number } | null>(null);
-  let compTimer: ReturnType<typeof setTimeout> | undefined;
-  let compSeq = 0;
-
-  function updateComp() {
-    clearTimeout(compTimer);
-    const t = textarea ? typingAt(input, textarea.selectionStart) : null;
-    if (!t) {
-      comp = null;
-      return;
-    }
-    const seq = ++compSeq;
-    compTimer = setTimeout(async () => {
-      try {
-        const items = await api.listFiles(current?.id, t.path);
-        if (seq === compSeq) comp = items.length ? { typing: t, items, sel: 0 } : null;
-      } catch {
-        if (seq === compSeq) comp = null;
-      }
-    }, 150);
-  }
-
-  async function pick(e: FsEntry) {
-    if (!comp || !textarea) return;
-    const { start } = comp.typing;
-    const end = textarea.selectionStart;
-    const ins = completion(e.path, e.dir, comp.typing.quoted);
-    input = input.slice(0, start) + ins + input.slice(end);
-    comp = null;
-    await tick();
-    textarea.focus();
-    textarea.setSelectionRange(start + ins.length, start + ins.length);
-    if (e.dir) updateComp();
-  }
-
-  /** Keys for the open dropdown; true if handled. */
-  function compKey(e: KeyboardEvent): boolean {
-    if (!comp) return false;
-    const n = comp.items.length;
-    if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) comp.sel = (comp.sel + 1) % n;
-    else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) comp.sel = (comp.sel + n - 1) % n;
-    else if (e.key === 'Enter' && !e.shiftKey) pick(comp.items[comp.sel]);
-    else if (e.key === 'Escape') comp = null;
-    else return false;
-    e.preventDefault();
-    return true;
-  }
-
-  function dismissAt(path: string) {
-    delete atFiles[path];
-    atDismissed.push(path);
-  }
-
-  /** Resolves mentions still pending (e.g. one at the very end) and returns the found files. */
-  async function atAttachments(text: string): Promise<Attachment[]> {
-    const paths = mentions(text, true).filter((p) => !atDismissed.includes(p));
-    await Promise.all(paths.map((p) => (p in atFiles && atFiles[p].status !== 'loading' ? null : resolveAt(p))));
-    const out: Attachment[] = [];
-    for (const p of paths) {
-      const f = atFiles[p];
-      if (f?.status === 'ok') out.push(f.att);
-    }
-    return out;
-  }
-
-  async function send() {
-    const text = input.trim();
-    if ((!text && !attachments.length) || busy) return;
+  async function send(text: string, atts: Attachment[]) {
+    if (busy) return;
     if (!current) await newChat();
-    const manual = attachments;
-    const atts = [...manual, ...(await atAttachments(text))];
+    const prevText = input;
+    const prevAtts = attachments;
     input = '';
     attachments = [];
     const ok = await run((conv, on) => api.sendMessage(conv.id, leaf, text, atts, on));
     if (!ok && !messages.some((m) => m.content === text)) {
-      input = text;
-      attachments = manual;
+      input = prevText;
+      attachments = prevAtts;
     }
   }
 
@@ -260,10 +149,8 @@
     editAtts = [...(m.attachments ?? [])];
   }
 
-  async function submitEdit(m: Message) {
-    const text = editText.trim();
-    const atts = editAtts;
-    if ((!text && !atts.length) || busy) return;
+  async function submitEdit(m: Message, text: string, atts: Attachment[]) {
+    if (busy) return;
     editing = null;
     // Hide the old branch while the new one streams.
     leaf = m.parent_id;
@@ -339,14 +226,6 @@
       refreshList();
     }
     return ok;
-  }
-
-  function onKey(e: KeyboardEvent) {
-    if (compKey(e)) return;
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      send();
-    }
   }
 
   /** Short line: model name without vendor prefix, plus cost. */
@@ -455,19 +334,23 @@
         <div class="msg {m.role}">
           {#if m.role === 'user'}
             {#if editing === m.id}
-              <textarea class="edit" bind:value={editText} rows="4"></textarea>
-              <div class="actions">
-                <button onclick={() => submitEdit(m)} disabled={busy || (!editText.trim() && !editAtts.length)}>Send</button>
-                <button onclick={() => (editing = null)}>Cancel</button>
-              </div>
+              <MessageInput
+                bind:text={editText}
+                bind:attachments={editAtts}
+                conv={current?.id}
+                {busy}
+                compact
+                rows={4}
+                onsubmit={(t, a) => submitEdit(m, t, a)}
+                oncancel={() => (editing = null)}
+              >
+                {#snippet actions(submit, can)}
+                  <button type="button" onclick={submit} disabled={!can}>Send</button>
+                  <button type="button" onclick={() => (editing = null)}>Cancel</button>
+                {/snippet}
+              </MessageInput>
             {:else}
               <div class="text plain">{m.content}</div>
-            {/if}
-            {#if editing === m.id}
-              {#each editAtts as a, i}
-                <div class="att">📎 {a.name} <button class="att-x" title="Remove from edit" onclick={() => editAtts.splice(i, 1)}>×</button></div>
-              {/each}
-            {:else}
               {#each m.attachments ?? [] as a}
                 <div class="att">📎 {a.name}</div>
               {/each}
@@ -533,59 +416,22 @@
       {/each}
       {#if error}<div class="err">⚠ {error}</div>{/if}
     </div>
-    {#if attachments.length || Object.keys(atFiles).length}
-      <div class="chips">
-        {#each attachments as a, i}
-          <span class="chip">📎 {a.name} <button title="Remove" onclick={() => attachments.splice(i, 1)}>×</button></span>
-        {/each}
-        {#each Object.entries(atFiles) as [p, f] (p)}
-          {#if f.status === 'ok'}
-            <span class="chip at">📎 @{p} <button title="Don't attach" onclick={() => dismissAt(p)}>×</button></span>
-          {:else if f.status === 'loading'}
-            <span class="chip at">… @{p}</span>
-          {:else}
-            <span class="chip at-err" title={f.msg}>⚠ @{p}: {f.msg} <button title="Dismiss" onclick={() => dismissAt(p)}>×</button></span>
-          {/if}
-        {/each}
-      </div>
-    {/if}
-    <form onsubmit={(e) => { e.preventDefault(); send(); }}>
-      <input
-        type="file"
-        accept=".txt,.md,.markdown,text/plain,text/markdown"
-        multiple
-        hidden
-        bind:this={fileInput}
-        onchange={(e) => addFiles(e.currentTarget.files)}
-      />
-      <button type="button" title="Attach text/markdown files" onclick={() => fileInput?.click()}>📎</button>
-      {#if comp}
-        <ul class="comp" role="listbox">
-          {#each comp.items as it, i (it.path)}
-            <li role="option" aria-selected={i === comp.sel}>
-              <button type="button" class:sel={i === comp.sel} onmousedown={(e) => { e.preventDefault(); pick(it); }}>
-                {it.dir ? '📁' : '📄'} {it.path}
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-      <textarea
-        bind:this={textarea}
-        bind:value={input}
-        oninput={updateComp}
-        onclick={updateComp}
-        onblur={() => { clearTimeout(compTimer); compSeq++; comp = null; }}
-        onkeydown={onKey}
-        rows="3"
-        placeholder="Message (Enter to send, Shift+Enter for newline)"
-      ></textarea>
-      {#if busy}
-        <button type="button" onclick={stopGen}>Stop</button>
-      {:else}
-        <button type="submit" disabled={!input.trim() && !attachments.length}>Send</button>
-      {/if}
-    </form>
+    <MessageInput
+      bind:text={input}
+      bind:attachments
+      conv={current?.id}
+      {busy}
+      placeholder="Message (Enter to send, Shift+Enter for newline)"
+      onsubmit={send}
+    >
+      {#snippet actions(submit, can)}
+        {#if busy}
+          <button type="button" onclick={stopGen}>Stop</button>
+        {:else}
+          <button type="submit" disabled={!can}>Send</button>
+        {/if}
+      {/snippet}
+    </MessageInput>
   </main>
 </div>
 
@@ -737,27 +583,7 @@
   .thinking summary { cursor: pointer; user-select: none; }
   .thinking .plain { margin-top: 4px; max-height: 40vh; overflow-y: auto; }
   .details dd { margin: 0; overflow-wrap: anywhere; }
-  .edit { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
-  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
   .err { color: #c44; margin-top: 4px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0; font-size: 0.85em; }
-  .chip { background: #8882; border-radius: 12px; padding: 2px 8px; }
-  .chip.at { background: #4a8af433; }
-  .chip.at-err { background: #e5484d33; max-width: 100%; overflow-wrap: anywhere; }
-  .att-x { background: none; border: none; color: #888; cursor: pointer; padding: 0 4px; }
-  .chip button { background: none; border: none; color: #888; cursor: pointer; }
-  form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; position: relative; }
-  .comp {
-    position: absolute; bottom: 100%; left: 16px; right: 16px; z-index: 5;
-    max-height: 40vh; overflow-y: auto; margin: 0 0 4px; padding: 4px 0; list-style: none;
-    background: var(--field); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9em;
-  }
-  .comp button {
-    display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 0;
-    padding: 3px 10px; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere;
-  }
-  .comp button.sel, .comp button:hover { background: #4a8af433; }
-  textarea { flex: 1; resize: vertical; font: inherit; padding: 8px; }
   .menu, .backdrop { display: none; }
   @media (max-width: 640px) {
     .menu {
