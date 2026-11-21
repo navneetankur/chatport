@@ -18,6 +18,7 @@
 
   const path = $derived(pathTo(messages, leaf));
   let showSettings = $state(false);
+  let showSidebar = $state(false); // phone only
 
   /** Usage summed over the shown branch. */
   const totals = $derived.by(() => {
@@ -48,6 +49,7 @@
     const c = await api.getConversation(id);
     current = c.meta;
     showSettings = false;
+    showSidebar = false;
     messages = c.messages;
     leaf = c.leaf;
     location.hash = id;
@@ -281,7 +283,10 @@
 </script>
 
 <div class="app">
-  <aside>
+  {#if showSidebar}
+    <button class="backdrop" aria-label="Close menu" onclick={() => (showSidebar = false)}></button>
+  {/if}
+  <aside class:open={showSidebar}>
     <button class="new" onclick={newChat}>+ New chat</button>
     <ul>
       {#each convs as c (c.id)}
@@ -309,6 +314,7 @@
 
   <main>
     <header>
+      <button class="menu" title="Chats" onclick={() => (showSidebar = !showSidebar)}>☰</button>
       <span class="htitle">
         {current ? `${current.title} — ${current.model}` : 'chatport'}
         {#if current?.reasoning_effort}
@@ -573,7 +579,35 @@
   .chip button { background: none; border: none; color: #888; cursor: pointer; }
   form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; }
   textarea { flex: 1; resize: vertical; font: inherit; padding: 8px; }
+  .menu, .backdrop { display: none; }
   @media (max-width: 640px) {
-    aside { display: none; }
+    .menu {
+      display: block;
+      background: none;
+      border: none;
+      padding: 0 4px;
+      font-size: 1.2em;
+    }
+    aside {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: min(80vw, 300px);
+      background: var(--bg);
+      z-index: 20;
+      transform: translateX(-100%);
+      transition: transform 0.2s ease;
+    }
+    aside.open { transform: none; }
+    .backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: #0006;
+      border: none;
+      border-radius: 0;
+      padding: 0;
+    }
+    .totals { display: none; }
   }
 </style>
