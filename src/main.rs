@@ -3,6 +3,7 @@
 mod api;
 mod auth;
 mod config;
+mod files;
 mod provider;
 mod store;
 mod tree;

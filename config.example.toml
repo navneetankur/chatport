@@ -11,6 +11,10 @@ data_dir = "~/.local/share/chatport"
 # key = "sk-or-..."
 default_model = "openrouter/free"
 
+# Directory for `@relative/path` attachments in new chats (per-chat in settings).
+# `@/abs/path` and `@~/path` work without it.
+# default_file_root = "~/notes"
+
 # OpenRouter `provider` routing object, passed through as-is. Per-conversation override via API.
 # [default_provider]
 # order = ["anthropic"]

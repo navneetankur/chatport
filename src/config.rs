@@ -20,6 +20,9 @@ pub struct Config {
     /// OpenRouter `provider` routing object, passed through as-is.
     #[serde(default)]
     pub default_provider: Option<Value>,
+    /// Directory `@relative/path` attachments resolve against in new chats.
+    #[serde(default)]
+    pub default_file_root: Option<String>,
     /// HTTP Basic auth; off when absent.
     #[serde(default)]
     pub auth: Option<Auth>,

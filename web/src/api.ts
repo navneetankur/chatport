@@ -43,6 +43,7 @@ export interface Meta {
   cache: 'auto' | 'off';
   reasoning_effort?: ReasoningEffort | null;
   key_name?: string | null;
+  file_root?: string | null;
   leaf?: string | null;
 }
 
@@ -153,7 +154,23 @@ export type MetaPatch = Partial<{
   cache: 'auto' | 'off';
   reasoning_effort: ReasoningEffort | null; // null = model default
   key_name: string | null; // null = config default
+  file_root: string; // "" clears
 }>;
+
+/** Server-side file for an `@path` mention; throws with the server's reason. */
+export async function fetchFile(conv: string | undefined, path: string): Promise<Attachment> {
+  const q = new URLSearchParams({ path });
+  if (conv) q.set('conv', conv);
+  const r = await fetch(`/api/file?${q}`);
+  if (r.ok) return r.json();
+  const body = await r.text();
+  try {
+    throw new Error(JSON.parse(body).error);
+  } catch (e) {
+    if (e instanceof SyntaxError) throw new Error(`${r.status}: ${body}`);
+    throw e;
+  }
+}
 
 export const patchConversation = (id: string, patch: MetaPatch) =>
   fetch(`/api/conversations/${id}`, {

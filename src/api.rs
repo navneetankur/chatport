@@ -1,8 +1,9 @@
 use crate::AppState;
+use crate::files;
 use crate::provider::{CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role};
 use crate::store::{Attachment, Message, Meta, new_id, now_ms};
 use crate::tree;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -46,6 +47,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/models", get(models))
         .route("/api/keys", get(keys))
+        .route("/api/file", get(file))
         .route("/api/conversations", get(list).post(create))
         .route(
             "/api/conversations/{id}",
@@ -65,6 +67,32 @@ async fn models(State(s): St) -> R<Json<Value>> {
 /// Key names only, never the keys themselves.
 async fn keys(State(s): St) -> Json<Value> {
     Json(json!({ "names": s.config.key_names(), "default": s.config.default_key }))
+}
+
+#[derive(Deserialize)]
+struct FileQuery {
+    /// Conversation whose file root applies; absent = config default.
+    conv: Option<String>,
+    path: String,
+}
+
+/// Reads a server-side text file for an `@path` mention in the composer.
+async fn file(State(s): St, Query(q): Query<FileQuery>) -> R<Json<Attachment>> {
+    let root = match &q.conv {
+        Some(id) => load_meta(&s, id)?.file_root,
+        None => s.config.default_file_root.clone(),
+    };
+    let read = files::resolve(root.as_deref(), &q.path).and_then(|p| files::read_text(&p, &q.path));
+    match read {
+        Ok(a) => {
+            tracing::info!("attached @{} ({} bytes)", q.path, a.content.len());
+            Ok(Json(a))
+        }
+        Err(e) => {
+            tracing::info!("@{}: {e:#}", q.path);
+            Err(bad(&format!("{e:#}")))
+        }
+    }
 }
 
 async fn list(State(s): St) -> R<Json<Vec<Meta>>> {
@@ -96,6 +124,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         cache: r.cache.unwrap_or_default(),
         reasoning_effort: None,
         key_name: None,
+        file_root: s.config.default_file_root.clone(),
         leaf: None,
     };
     s.store.put_meta(&meta)?;
@@ -174,6 +203,8 @@ struct PatchReq {
     /// null = config default key.
     #[serde(default, deserialize_with = "some_option")]
     key_name: Option<Option<String>>,
+    /// "" clears.
+    file_root: Option<String>,
 }
 fn some_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -215,6 +246,10 @@ async fn patch_conv(
                 .map_err(|e| bad(&format!("{e:#}")))?;
         }
         meta.key_name = k;
+    }
+    if let Some(r) = r.file_root {
+        let r = r.trim();
+        meta.file_root = (!r.is_empty()).then(|| r.to_string());
     }
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;

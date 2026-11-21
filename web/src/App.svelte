@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import * as api from './api';
   import type { Attachment, Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
   import { codeCopy, copyWithFeedback, downloadText } from './clipboard';
   import Settings from './Settings.svelte';
+  import { mentions } from './mentions';
 
   let convs = $state<Meta[]>([]);
   let current = $state<Meta | null>(null);
@@ -124,17 +125,65 @@
     if (fileInput) fileInput.value = '';
   }
 
+  // `@path` mentions: resolved on the server once the token is complete
+  // (followed by whitespace, or closing quote), shown as chips above the input.
+  type AtFile = { status: 'loading' } | { status: 'ok'; att: Attachment } | { status: 'err'; msg: string };
+  let atFiles = $state<Record<string, AtFile>>({});
+  /** Mentions whose chip was removed with ×; not re-attached while in the text. */
+  let atDismissed = $state<string[]>([]);
+
+  function resolveAt(path: string): Promise<void> {
+    atFiles[path] = { status: 'loading' };
+    return api.fetchFile(current?.id, path).then(
+      (att) => {
+        if (atFiles[path]) atFiles[path] = { status: 'ok', att };
+      },
+      (e) => {
+        if (atFiles[path]) atFiles[path] = { status: 'err', msg: e instanceof Error ? e.message : String(e) };
+      },
+    );
+  }
+
+  // Depends on `input` only; chip state is read/written untracked.
+  $effect(() => {
+    const present = mentions(input, true);
+    const complete = mentions(input, false);
+    untrack(() => {
+      for (const k of Object.keys(atFiles)) if (!present.includes(k)) delete atFiles[k];
+      if (atDismissed.some((k) => !present.includes(k))) atDismissed = atDismissed.filter((k) => present.includes(k));
+      for (const p of complete) if (!(p in atFiles) && !atDismissed.includes(p)) resolveAt(p);
+    });
+  });
+
+  function dismissAt(path: string) {
+    delete atFiles[path];
+    atDismissed.push(path);
+  }
+
+  /** Resolves mentions still pending (e.g. one at the very end) and returns the found files. */
+  async function atAttachments(text: string): Promise<Attachment[]> {
+    const paths = mentions(text, true).filter((p) => !atDismissed.includes(p));
+    await Promise.all(paths.map((p) => (p in atFiles && atFiles[p].status !== 'loading' ? null : resolveAt(p))));
+    const out: Attachment[] = [];
+    for (const p of paths) {
+      const f = atFiles[p];
+      if (f?.status === 'ok') out.push(f.att);
+    }
+    return out;
+  }
+
   async function send() {
     const text = input.trim();
     if ((!text && !attachments.length) || busy) return;
     if (!current) await newChat();
-    const atts = attachments;
+    const manual = attachments;
+    const atts = [...manual, ...(await atAttachments(text))];
     input = '';
     attachments = [];
     const ok = await run((conv, on) => api.sendMessage(conv.id, leaf, text, atts, on));
     if (!ok && !messages.some((m) => m.content === text)) {
       input = text;
-      attachments = atts;
+      attachments = manual;
     }
   }
 
@@ -421,10 +470,19 @@
       {/each}
       {#if error}<div class="err">⚠ {error}</div>{/if}
     </div>
-    {#if attachments.length}
+    {#if attachments.length || Object.keys(atFiles).length}
       <div class="chips">
         {#each attachments as a, i}
           <span class="chip">📎 {a.name} <button title="Remove" onclick={() => attachments.splice(i, 1)}>×</button></span>
+        {/each}
+        {#each Object.entries(atFiles) as [p, f] (p)}
+          {#if f.status === 'ok'}
+            <span class="chip at">📎 @{p} <button title="Don't attach" onclick={() => dismissAt(p)}>×</button></span>
+          {:else if f.status === 'loading'}
+            <span class="chip at">… @{p}</span>
+          {:else}
+            <span class="chip at-err" title={f.msg}>⚠ @{p}: {f.msg} <button title="Dismiss" onclick={() => dismissAt(p)}>×</button></span>
+          {/if}
         {/each}
       </div>
     {/if}
@@ -606,6 +664,8 @@
   .err { color: #c44; margin-top: 4px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0; font-size: 0.85em; }
   .chip { background: #8882; border-radius: 12px; padding: 2px 8px; }
+  .chip.at { background: #4a8af433; }
+  .chip.at-err { background: #e5484d33; max-width: 100%; overflow-wrap: anywhere; }
   .chip button { background: none; border: none; color: #888; cursor: pointer; }
   form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; }
   textarea { flex: 1; resize: vertical; font: inherit; padding: 8px; }

@@ -41,6 +41,9 @@ pub struct Meta {
     /// Name of the config API key to use. None = config default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_name: Option<String>,
+    /// Directory `@relative/path` attachments resolve against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_root: Option<String>,
     /// Currently shown branch tip. None = last appended message.
     #[serde(default)]
     pub leaf: Option<String>,

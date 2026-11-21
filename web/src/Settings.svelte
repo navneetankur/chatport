@@ -18,6 +18,7 @@
   let effort = $state<ReasoningEffort | ''>(init.reasoning_effort ?? '');
   let provText = $state(init.provider ? JSON.stringify(init.provider, null, 2) : '');
   let keyName = $state(init.key_name ?? '');
+  let fileRoot = $state(init.file_root ?? '');
   let keys = $state<{ names: string[]; default: string }>({ names: [], default: '' });
   let models = $state<ModelInfo[]>([]);
   let error = $state('');
@@ -67,6 +68,7 @@
         cache,
         reasoning_effort: effort || null,
         key_name: keyName || null,
+        file_root: fileRoot.trim(),
         provider: Object.keys(prov).length ? prov : null,
       });
       onsaved(m);
@@ -118,6 +120,12 @@
       </select>
     </label>
   {/if}
+
+  <label>
+    File root
+    <input bind:value={fileRoot} placeholder="~/notes" />
+    <small>Directory for <code>@relative/path</code> attachments. <code>@/abs</code> and <code>@~/x</code> work without it.</small>
+  </label>
 
   <label>
     System prompt

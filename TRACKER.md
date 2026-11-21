@@ -29,6 +29,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Reasoning: `delta.reasoning` → `ChatEvent::Reasoning` → message `reasoning` (stored, never sent back as context), SSE `reasoning {text}`. UI: collapsible "Thinking" block (open while thinking). `usage.reasoning_tokens` (part of completion) shown in details.
 - Reasoning effort: `meta.reasoning_effort` (enum max…none, unset = model default) → body `reasoning: {effort}`. Settings dropdown. PATCH `null` clears. Note: some models reject `none` with a 400 (reasoning mandatory) — surfaced as reply error, deliberately not auto-handled.
 - API keys: config `[[keys]] {name, key}` + `default_key` (default: first). `--key`/env override the default key only (or create "default"). `Config::resolve_keys` at startup, `key_for(name)` per request. `meta.key_name` (None = default) → `ChatRequest.key`; missing key = reply error. `GET /api/keys` returns names only. `/api/models` uses the default key. Settings shows a picker only when >1 key.
+- `@path` mentions: `web/src/mentions.ts` parses complete tokens (`@a.md ` ends at whitespace, `@"a b.md"` at the closing quote, no escapes; on send the trailing one counts too). Composer `$effect` on `input` → `GET /api/file?conv=&path=` (`src/files.rs`: `/abs`, `~/x`, else relative to `meta.file_root`; text only, 256 KB cap) → chips (ok / loading / error). × dismisses (text kept). `@` stays in the text; found files are sent as ordinary attachments named by the typed path. `config.default_file_root` seeds new chats; settings has "File root".
 - `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
@@ -45,6 +46,9 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Per-message copy / download (.md, `<title-slug>-<msg-id>.md`) for user + assistant; raw-markdown toggle on assistant msgs (not persisted); copy button on code blocks. Reasoning excluded. Clipboard falls back to execCommand on plain-HTTP LAN.
 - [x] Multiple named API keys in config, picked per conversation in settings (switchable mid-chat).
 - [ ] Code blocks: syntax highlighting (highlight.js).
+- [x] `@path` attachments: server-side text files, chip above the composer once the token is complete.
+- [ ] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
+- [ ] Editing a user message can't remove its attachments (edit re-sends the original ones unchanged).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -80,3 +84,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Copy/download/raw toggle + code-block copy (web/src/clipboard.ts). Builds clean; not yet clicked through in a browser.
 - 2026-11-21: Named API keys (`openrouter_api_key` removed, no compat). Live: default key OK, switching to a bogus key → 401 reply error, PATCH to an unknown name → 400. Picker not yet clicked in a browser.
 - 2026-11-21: Optional HTTP Basic auth (`[auth] user/password`; off + startup warning when absent). Middleware precomputes the header with `base64` (already in tree via reqwest). curl: none/wrong → 401 + WWW-Authenticate, right → 200 for API and static. Not yet tried in a browser (SSE fetch should resend creds same-origin).
+- 2026-11-21: `@path` file attachments (no autocomplete yet). Tests for resolve/read; curl: relative/abs/missing/dir/no-root all as expected; parser checked in node. Not clicked through in a browser yet.
