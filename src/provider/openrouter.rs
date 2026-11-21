@@ -77,6 +77,11 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
         );
     }
     let mut out = Vec::new();
+    if let Some(m) = v.get("model").and_then(Value::as_str)
+        && !m.is_empty()
+    {
+        out.push(ChatEvent::Model(m.to_string()));
+    }
     if let Some(t) = v
         .pointer("/choices/0/delta/content")
         .and_then(Value::as_str)
@@ -148,6 +153,7 @@ impl Provider for OpenRouter {
         tokio::spawn(async move {
             let mut bytes = resp.bytes_stream();
             let mut buf: Vec<u8> = Vec::new();
+            let mut last_model: Option<String> = None;
             while let Some(chunk) = bytes.next().await {
                 let chunk = match chunk {
                     Ok(c) => c,
@@ -166,6 +172,13 @@ impl Provider for OpenRouter {
                     match parse_chunk(data.trim_start()) {
                         Ok(evs) => {
                             for ev in evs {
+                                // Every chunk repeats the model; forward it only when it changes.
+                                if let ChatEvent::Model(m) = &ev {
+                                    if last_model.as_ref() == Some(m) {
+                                        continue;
+                                    }
+                                    last_model = Some(m.clone());
+                                }
                                 let done = matches!(ev, ChatEvent::Done);
                                 if tx.send(Ok(ev)).is_err() || done {
                                     return;
@@ -244,6 +257,9 @@ mod tests {
     fn parses_delta_usage_done_error() {
         let ev = parse_chunk(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
         assert!(matches!(&ev[0], ChatEvent::Delta(t) if t == "hi"));
+        let ev = parse_chunk(r#"{"model":"x/y","choices":[{"delta":{"content":"hi"}}]}"#).unwrap();
+        assert!(matches!(&ev[0], ChatEvent::Model(m) if m == "x/y"));
+        assert!(matches!(&ev[1], ChatEvent::Delta(t) if t == "hi"));
         let ev = parse_chunk(
             r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"cost":0.01}}"#,
         )

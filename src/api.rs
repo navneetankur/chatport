@@ -359,6 +359,10 @@ fn generate(
                 };
                 let Some(item) = item else { break };
                 match item {
+                    Ok(ChatEvent::Model(m)) => {
+                        record_model(&mut asst, &meta.model, m);
+                        let _ = tx.send(ev("model", json!({ "model": &asst.model })));
+                    }
                     Ok(ChatEvent::Delta(t)) => {
                         asst.content.push_str(&t);
                         let _ = tx.send(ev("delta", json!({ "text": t })));
@@ -396,6 +400,12 @@ fn generate(
     Sse::new(UnboundedReceiverStream::new(rx).map(Ok)).keep_alive(KeepAlive::default())
 }
 
+/// Record the model that actually answered; keep the requested id only if it differs.
+fn record_model(asst: &mut Message, requested: &str, actual: String) {
+    asst.requested_model = (actual != requested).then(|| requested.to_string());
+    asst.model = Some(actual);
+}
+
 fn save_reply(s: &AppState, conv_id: &str, asst: &Message) -> anyhow::Result<()> {
     s.store.append(conv_id, asst)?;
     // Re-read meta: settings may have been patched while streaming.
@@ -428,6 +438,16 @@ mod tests {
         };
         assert_eq!(title_from(&m("  ", vec![att]), "cid"), "notes.md");
         assert_eq!(title_from(&m("", vec![]), "cid"), "cid");
+    }
+
+    #[test]
+    fn record_model_keeps_requested_only_when_different() {
+        let mut a = Message::assistant("u".into(), "openrouter/free".into());
+        record_model(&mut a, "openrouter/free", "x/llama".into());
+        assert_eq!(a.model.as_deref(), Some("x/llama"));
+        assert_eq!(a.requested_model.as_deref(), Some("openrouter/free"));
+        record_model(&mut a, "openrouter/free", "openrouter/free".into());
+        assert_eq!(a.requested_model, None);
     }
 
     #[test]

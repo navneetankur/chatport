@@ -24,12 +24,13 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Attachments: 📎 in composer reads .txt/.md client-side (2 MB cap), chips removable; edit re-sends the original attachments.
 - Title: server sets it on the first message of a "New chat" (`api::title_from`: first non-empty line → attachment name → conv id, 20 chars + …). Rename: ✎ in sidebar (or dbl-click) → PATCH title.
 - Theme: CSS vars on `:root` in App.svelte (light/dark), global styles for button/textarea/input/select; `.primary` / submit = accent blue.
+- Actual model: `ChatEvent::Model` from chunk `model` (deduped in provider task) → assistant `model`; `requested_model` set only when it differs. SSE `model {model}` event. UI: `actual (via requested)`.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
 - [ ] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
-- [ ] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
+- [x] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
 - [x] Stop endpoint `POST /:id/stop`.
 - [x] UI colors: message box and send button are yellow on dark bg — ugly, pick something that fits the dark theme.
 - [x] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
@@ -59,3 +60,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Milestone 5 (settings panel + branch usage totals). Frontend only; backend PATCH already existed. svelte-check clean; curl-tested /api/models + PATCH on scratch server. Router ids like `openrouter/free` aren't in /models, so the picker shows "Unknown model id" for them (harmless).
 - 2026-11-21: Milestone 6 (stop + attachments). Live-tested via curl: stop mid-stream → partial saved; attachment content reaches the model. Next: the 3 UI TODOs (colors, title from first msg, rename).
 - 2026-11-21: Auto-title from first msg, rename, dark-theme control colors (replaced unstyled default controls). Curl-tested title + rename. Colors need a look in the browser.
+- 2026-11-21: Record actual model. Live: `openrouter/free` → `nvidia/nemotron-3.5-super-vl:free`, requested_model kept. Remaining backlog: Haiku cache-hit check.

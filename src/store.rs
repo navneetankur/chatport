@@ -57,6 +57,9 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Model id the request asked for, when it differs from `model` (e.g. a router like `openrouter/free`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     /// Stream ended early (error / abort). Content is whatever arrived.
@@ -76,6 +79,7 @@ impl Message {
             content,
             attachments,
             model: None,
+            requested_model: None,
             usage: None,
             partial: false,
             error: None,

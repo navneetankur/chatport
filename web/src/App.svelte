@@ -199,6 +199,9 @@
             leaf = e.data.id;
             streaming = placeholder(e.data.id, conv.model);
             break;
+          case 'model':
+            if (streaming) streaming.model = e.data.model;
+            break;
           case 'delta':
             if (streaming) streaming.content += e.data.text;
             break;
@@ -233,8 +236,9 @@
 
   function usageLine(m: Message): string {
     const u = m.usage;
-    if (!u) return m.model ?? '';
-    const parts = [m.model, `${u.prompt_tokens} in`, `${u.completion_tokens} out`];
+    const model = m.requested_model ? `${m.model} (via ${m.requested_model})` : m.model;
+    if (!u) return model ?? '';
+    const parts = [model, `${u.prompt_tokens} in`, `${u.completion_tokens} out`];
     if (u.cached_tokens) parts.push(`${u.cached_tokens} cached`);
     if (u.cost != null) parts.push(`$${u.cost.toFixed(5)}`);
     return parts.filter(Boolean).join(' · ');

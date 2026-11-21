@@ -52,6 +52,8 @@ pub struct ChatRequest {
 
 #[derive(Debug)]
 pub enum ChatEvent {
+    /// Model that actually serves the request (may differ from the requested id, e.g. routers).
+    Model(String),
     Delta(String),
     Usage(Usage),
     Done,

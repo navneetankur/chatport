@@ -19,6 +19,7 @@ export interface Message {
   content: string;
   attachments?: Attachment[];
   model?: string;
+  requested_model?: string;
   usage?: Usage;
   partial?: boolean;
   error?: string;
@@ -63,6 +64,7 @@ export async function deleteConversation(id: string): Promise<void> {
 
 export type StreamEvent =
   | { event: 'user_saved'; data: Message }
+  | { event: 'model'; data: { model: string } }
   | { event: 'delta'; data: { text: string } }
   | { event: 'usage'; data: Usage }
   | { event: 'error'; data: { message: string } }
