@@ -39,6 +39,8 @@
 
   async function refreshList() {
     convs = await api.listConversations();
+    const fresh = current && convs.find((c) => c.id === current!.id);
+    if (fresh) current = fresh;
   }
 
   async function open(id: string) {

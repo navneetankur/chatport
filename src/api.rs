@@ -79,7 +79,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
     let now = now_ms();
     let meta = Meta {
         id: new_id(),
-        title: r.title.unwrap_or_else(|| "New chat".into()),
+        title: r.title.unwrap_or_else(|| DEFAULT_TITLE.into()),
         created_at: now,
         updated_at: now,
         model: r.model.unwrap_or_else(|| s.config.default_model.clone()),
@@ -90,6 +90,26 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
     };
     s.store.put_meta(&meta)?;
     Ok(Json(meta))
+}
+
+const DEFAULT_TITLE: &str = "New chat";
+const TITLE_MAX_CHARS: usize = 20;
+
+/// Title from the first message: its first non-empty line, else the first
+/// attachment's name, else the conversation id. Truncated with an ellipsis.
+fn title_from(first: &Message, conv_id: &str) -> String {
+    let base = first
+        .content
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .or_else(|| first.attachments.first().map(|a| a.name.as_str()))
+        .unwrap_or(conv_id);
+    if base.chars().count() <= TITLE_MAX_CHARS {
+        return base.to_string();
+    }
+    let cut: String = base.chars().take(TITLE_MAX_CHARS).collect();
+    return format!("{}…", cut.trim_end());
 }
 
 fn load_meta(s: &AppState, id: &str) -> R<Meta> {
@@ -226,6 +246,9 @@ async fn send(
     }
     let user = Message::user(r.parent_id, r.content, r.attachments);
     s.store.append(&id, &user)?;
+    if msgs.is_empty() && meta.title == DEFAULT_TITLE {
+        meta.title = title_from(&user, &id);
+    }
     meta.leaf = Some(user.id.clone());
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
@@ -387,6 +410,25 @@ fn save_reply(s: &AppState, conv_id: &str, asst: &Message) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_from_first_message() {
+        let m = |c: &str, atts: Vec<Attachment>| Message::user(None, c.into(), atts);
+        assert_eq!(
+            title_from(&m("\n  hi there \nmore", vec![]), "cid"),
+            "hi there"
+        );
+        assert_eq!(
+            title_from(&m("ääääääääääääääääääääääää", vec![]), "cid"),
+            "ää".repeat(10) + "…"
+        );
+        let att = Attachment {
+            name: "notes.md".into(),
+            content: "x".into(),
+        };
+        assert_eq!(title_from(&m("  ", vec![att]), "cid"), "notes.md");
+        assert_eq!(title_from(&m("", vec![]), "cid"), "cid");
+    }
 
     #[test]
     fn flatten_uses_safe_fence() {
