@@ -33,7 +33,7 @@ pub async fn require(State(exp): State<Expected>, req: Request, next: Next) -> R
     if exp.matches(req.headers().get(header::AUTHORIZATION)) {
         return next.run(req).await;
     }
-    tracing::debug!("auth rejected: {} {}", req.method(), req.uri().path());
+    log::debug!("auth rejected: {} {}", req.method(), req.uri().path());
     return (
         StatusCode::UNAUTHORIZED,
         [(header::WWW_AUTHENTICATE, r#"Basic realm="chatport""#)],

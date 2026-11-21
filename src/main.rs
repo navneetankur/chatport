@@ -72,11 +72,7 @@ fn read_keyfile(path: &std::path::Path) -> Result<String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = parse_args()?;
     let mut cfg = config::load(args.config)?;
@@ -85,7 +81,7 @@ async fn main() -> Result<()> {
         None => std::env::var("OPENROUTER_API_KEY").ok(),
     };
     cfg.resolve_keys(override_key)?;
-    tracing::info!(
+    log::info!(
         "API keys: {:?} (default {:?})",
         cfg.key_names(),
         cfg.default_key.as_deref().unwrap_or_default()
@@ -105,15 +101,15 @@ async fn main() -> Result<()> {
         Some(a) => {
             let exp = auth::Expected::new(&a.user, &a.password);
             app = app.layer(axum::middleware::from_fn_with_state(exp, auth::require));
-            tracing::info!("basic auth enabled for user {:?}", a.user);
+            log::info!("basic auth enabled for user {:?}", a.user);
         }
-        None => tracing::warn!("no [auth] in config: anyone on the network can use this"),
+        None => log::warn!("no [auth] in config: anyone on the network can use this"),
     }
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind)
         .await
         .with_context(|| format!("binding {}", cfg.bind))?;
-    tracing::info!("listening on http://{}", cfg.bind);
+    log::info!("listening on http://{}", cfg.bind);
     axum::serve(listener, app).await?;
     Ok(())
 }

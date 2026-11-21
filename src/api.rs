@@ -94,11 +94,11 @@ async fn file(State(s): St, Query(q): Query<FileQuery>) -> R<Json<Attachment>> {
     let read = files::resolve(root.as_deref(), &q.path).and_then(|p| files::read_text(&p, &q.path));
     match read {
         Ok(a) => {
-            tracing::info!("attached @{} ({} bytes)", q.path, a.content.len());
+            log::info!("attached @{} ({} bytes)", q.path, a.content.len());
             Ok(Json(a))
         }
         Err(e) => {
-            tracing::info!("@{}: {e:#}", q.path);
+            log::info!("@{}: {e:#}", q.path);
             Err(bad(&format!("{e:#}")))
         }
     }
@@ -298,7 +298,7 @@ async fn stop(State(s): St, Path(id): Path<String>) -> R<Json<Value>> {
         Some((_, tx)) => tx.send(()).is_ok(),
         None => false,
     };
-    tracing::info!("stop {id}: stopped={stopped}");
+    log::info!("stop {id}: stopped={stopped}");
     Ok(Json(json!({ "stopped": stopped })))
 }
 
@@ -549,7 +549,7 @@ fn generate(
             let started = tokio::select! {
                 r = s.provider.stream_chat(req.clone()) => r,
                 _ = &mut cancel => {
-                    tracing::info!("generation in {conv_id} stopped before first token");
+                    log::info!("generation in {conv_id} stopped before first token");
                     break;
                 }
             };
@@ -565,7 +565,7 @@ fn generate(
                 let item = tokio::select! {
                     i = stream.next() => i,
                     _ = &mut cancel => {
-                        tracing::info!("generation in {conv_id} stopped");
+                        log::info!("generation in {conv_id} stopped");
                         break 'rounds;
                     }
                 };
@@ -616,7 +616,7 @@ fn generate(
                     "model tried to call {}, but tools are off for this chat",
                     names.join(", ")
                 );
-                tracing::warn!("{conv_id}: {w}");
+                log::warn!("{conv_id}: {w}");
                 asst.warning = Some(w);
                 done = true;
                 break;
@@ -654,7 +654,7 @@ fn generate(
         }
         asst.partial = !done;
         if let Err(e) = save_reply(&s, &conv_id, &asst) {
-            tracing::error!("saving reply in {conv_id}: {e:#}");
+            log::error!("saving reply in {conv_id}: {e:#}");
         }
         if let Some(err) = &asst.error {
             let _ = tx.send(ev("error", json!({ "message": err })));

@@ -168,7 +168,7 @@ impl Store {
                 .and_then(|b| Ok(serde_json::from_slice(&b)?))
             {
                 Ok(m) => out.push(m),
-                Err(err) => tracing::warn!("skipping {}: {err:#}", path.display()),
+                Err(err) => log::warn!("skipping {}: {err:#}", path.display()),
             }
         }
         out.sort_by_key(|m: &Meta| std::cmp::Reverse(m.updated_at));
@@ -208,7 +208,7 @@ impl Store {
             .filter_map(|l| match serde_json::from_str(l) {
                 Ok(m) => Some(m),
                 Err(e) => {
-                    tracing::warn!("{}: skipping bad line: {e}", path.display());
+                    log::warn!("{}: skipping bad line: {e}", path.display());
                     None
                 }
             })

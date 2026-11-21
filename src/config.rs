@@ -139,7 +139,7 @@ pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
     };
     let (cfg, unknown) = parse(&text).with_context(|| format!("parsing {}", path.display()))?;
     for key in unknown {
-        tracing::error!("{}: unknown config key `{key}` (ignored)", path.display());
+        log::error!("{}: unknown config key `{key}` (ignored)", path.display());
     }
     return Ok(cfg);
 }

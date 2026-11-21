@@ -49,5 +49,5 @@ fn serve(path: &str) -> Option<Response> {
 }
 
 fn log_missing() {
-    tracing::warn!("index.html not embedded; build the frontend with tools/build.sh");
+    log::warn!("index.html not embedded; build the frontend with tools/build.sh");
 }

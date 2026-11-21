@@ -97,7 +97,7 @@ pub fn run(root: &str, call: &ToolCall) -> ToolResult {
             diff: None,
         },
     };
-    tracing::info!(
+    log::info!(
         "tool {}({}) error={}",
         call.name,
         short(&call.arguments),
