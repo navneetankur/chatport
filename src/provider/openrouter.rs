@@ -195,6 +195,9 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
             cached_tokens: n("/prompt_tokens_details/cached_tokens"),
             reasoning_tokens: n("/completion_tokens_details/reasoning_tokens"),
             cost: u.get("cost").and_then(Value::as_f64),
+            upstream_cost: u
+                .pointer("/cost_details/upstream_inference_cost")
+                .and_then(Value::as_f64),
         }));
     }
     Ok(out)
@@ -389,11 +392,11 @@ mod tests {
             parse_chunk(r#"{"choices":[{"delta":{"content":"","reasoning":"hmm"}}]}"#).unwrap();
         assert!(matches!(&ev[..], [ChatEvent::Reasoning(t)] if t == "hmm"));
         let ev = parse_chunk(
-            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"completion_tokens_details":{"reasoning_tokens":1},"cost":0.01}}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"completion_tokens_details":{"reasoning_tokens":1},"cost":0.01,"cost_details":{"upstream_inference_cost":0.5}}}"#,
         )
         .unwrap();
         assert!(
-            matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.reasoning_tokens == 1 && u.cost == Some(0.01))
+            matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.reasoning_tokens == 1 && u.cost == Some(0.01) && u.upstream_cost == Some(0.5))
         );
         assert!(matches!(parse_chunk("[DONE]").unwrap()[0], ChatEvent::Done));
         assert!(parse_chunk(r#"{"error":{"message":"nope"}}"#).is_err());

@@ -50,6 +50,10 @@ pub struct Usage {
     pub reasoning_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
+    /// What the upstream provider charged (BYOK: billed to the user's own key,
+    /// while `cost` is OpenRouter's charge, often 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_cost: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -96,10 +100,15 @@ impl Usage {
         self.completion_tokens += o.completion_tokens;
         self.cached_tokens += o.cached_tokens;
         self.reasoning_tokens += o.reasoning_tokens;
-        self.cost = match (self.cost, o.cost) {
-            (None, None) => None,
-            (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
-        };
+        self.cost = add_opt(self.cost, o.cost);
+        self.upstream_cost = add_opt(self.upstream_cost, o.upstream_cost);
+    }
+}
+
+fn add_opt(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
     }
 }
 

@@ -30,7 +30,7 @@
       tokIn += m.usage.prompt_tokens;
       tokOut += m.usage.completion_tokens;
       cached += m.usage.cached_tokens;
-      cost += m.usage.cost ?? 0;
+      cost += api.totalCost(m.usage) ?? 0;
     }
     return { tokIn, tokOut, cached, cost };
   });
@@ -237,8 +237,18 @@
   /** Short line: model name without vendor prefix, plus cost. */
   function shortLine(m: Message): string {
     const name = m.model?.split('/').pop();
-    const cost = m.usage?.cost != null ? `$${m.usage.cost.toFixed(4)}` : '';
+    const t = m.usage && api.totalCost(m.usage);
+    const cost = t != null ? `$${t.toFixed(4)}` : '';
     return [name, cost].filter(Boolean).join(' · ');
+  }
+
+  /** Cost rows: whichever of cost / upstream are non-zero; "Cost $0" if neither. */
+  function costRows(u: Message['usage']): [string, string | undefined][] {
+    if (!u || (u.cost == null && u.upstream_cost == null)) return [];
+    const rows: [string, string][] = [];
+    if (u.cost) rows.push(['Cost', `$${u.cost.toFixed(6)}`]);
+    if (u.upstream_cost) rows.push(['Upstream cost', `$${u.upstream_cost.toFixed(6)}`]);
+    return rows.length ? rows : [['Cost', '$0']];
   }
 
   /** Details rows for the ⓘ toggle. */
@@ -255,7 +265,7 @@
             (u.reasoning_tokens ? ` (${u.reasoning_tokens} reasoning)` : '') +
             (u.cached_tokens ? ` · ${u.cached_tokens} cached` : ''),
       ],
-      ['Cost', u?.cost != null ? `$${u.cost.toFixed(6)}` : undefined],
+      ...costRows(u),
       ['Time', new Date(m.created_at).toLocaleString()],
     ];
     return rows.filter((r): r is [string, string] => !!r[1]);

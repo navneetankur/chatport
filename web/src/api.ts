@@ -6,6 +6,8 @@ export interface Usage {
   cached_tokens: number;
   reasoning_tokens?: number;
   cost?: number;
+  /** BYOK: what the upstream provider billed to the user's own key. */
+  upstream_cost?: number;
 }
 
 export interface Attachment {
@@ -222,3 +224,9 @@ export const patchConversation = (id: string, patch: MetaPatch) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   }).then((r) => json<Meta>(r));
+
+/** Total spend for one usage record: OpenRouter's charge plus upstream (BYOK). */
+export function totalCost(u: Usage): number | undefined {
+  if (u.cost == null && u.upstream_cost == null) return undefined;
+  return (u.cost ?? 0) + (u.upstream_cost ?? 0);
+}
