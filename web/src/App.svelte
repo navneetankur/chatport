@@ -364,6 +364,16 @@
         <Settings meta={current} onsaved={onSaved} onclose={() => (showSettings = false)} />
       {/key}
     {/if}
+    {#snippet content(m: Message)}
+      {#if openRaw[m.id]}
+        <div class="text plain raw">{m.content}</div>
+      {:else if m === streaming}
+        <div class="text md">{@html renderMarkdown(m.content)}</div>
+      {:else}
+        {@const html = renderMarkdown(m.content)}
+        <div class="text md" use:codeCopy={html}>{@html html}</div>
+      {/if}
+    {/snippet}
     <div class="msgs" bind:this={scroller}>
       {#each [...path, ...(streaming ? [streaming] : [])] as m (m.id || 'streaming')}
         <div class="msg {m.role}">
@@ -385,7 +395,7 @@
                 {/snippet}
               </MessageInput>
             {:else}
-              <div class="text plain">{m.content}</div>
+              {@render content(m)}
               {#each m.attachments ?? [] as a}
                 <div class="att">
                   <button class="link" title="Open in new tab" onclick={() => openText(a.content)}>📎 {a.name}</button>
@@ -423,14 +433,7 @@
                 </details>
               {/each}
             {/each}
-            {#if openRaw[m.id]}
-              <div class="text plain raw">{m.content}</div>
-            {:else if m === streaming}
-              <div class="text md">{@html renderMarkdown(m.content)}</div>
-            {:else}
-              {@const html = renderMarkdown(m.content)}
-              <div class="text md" use:codeCopy={html}>{@html html}</div>
-            {/if}
+            {@render content(m)}
             {#if m.partial && !m.error && m !== streaming}<div class="att">(stopped)</div>{/if}
             {#if m.warning}<div class="warn">⚠ {m.warning}</div>{/if}
             {#if m.error}<div class="err">⚠ {m.error}</div>{/if}
@@ -447,14 +450,14 @@
               {/if}
               <button class="icon" title="Copy markdown" onclick={(e) => copyWithFeedback(e.currentTarget, m.content)}>⧉</button>
               <button class="icon" title="Download .md" onclick={() => download(m)}>⤓</button>
+              <button
+                class="icon"
+                title="Show raw markdown"
+                class:on={openRaw[m.id]}
+                onclick={() => (openRaw[m.id] = !openRaw[m.id])}>&lt;/&gt;</button>
               {#if m.role === 'user'}
                 <button class="icon" title="Edit" onclick={() => startEdit(m)} disabled={busy}>✎</button>
               {:else}
-                <button
-                  class="icon"
-                  title="Show raw markdown"
-                  class:on={openRaw[m.id]}
-                  onclick={() => (openRaw[m.id] = !openRaw[m.id])}>&lt;/&gt;</button>
                 <button class="icon" title="Regenerate" onclick={() => regen(m)} disabled={busy}>↻</button>
                 <span>{shortLine(m)}</span>
                 <button

@@ -58,7 +58,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
 - [x] View sent attachments: click the 📎 chip → plain text in a new tab (blob URL); `.md` also gets "rendered" (DOMPurify'd HTML page).
 - [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.
-- [ ] Decide: render markdown in user messages too (same pipeline, raw toggle).
+- [x] User messages render markdown too (shared `content` snippet in App.svelte, same `</>` raw toggle as replies).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -104,3 +104,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Config parse now warns on unknown keys via `serde_ignored` (e.g. `bind` placed under `[auth]` → `auth.bind`). Test added.
 - 2026-11-21: OpenRouter app attribution as client default headers (referer = GitHub URL, title, `hidden`, `general-chat`). `hidden` only applies when the app is first created, so never send the referer without it. Not live-tested yet: check the dashboard no longer shows "Unknown".
 - 2026-11-22: Attachment viewer (frontend only, `openText`/`openHtml` in clipboard.ts). Builds; not clicked through in a browser yet.
+- 2026-11-22: User messages rendered as markdown via the same snippet as assistant ones. svelte-check clean; not clicked through in a browser yet.
