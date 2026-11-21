@@ -116,3 +116,27 @@ export async function setLeaf(id: string, msgId: string): Promise<string> {
   });
   return (await json<{ leaf: string }>(r)).leaf;
 }
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  context_length?: number;
+  pricing?: { prompt?: string; completion?: string };
+}
+
+export const listModels = () => fetch('/api/models').then((r) => json<ModelInfo[]>(r));
+
+export type MetaPatch = Partial<{
+  title: string;
+  model: string;
+  provider: unknown; // null clears
+  system: string; // "" clears
+  cache: 'auto' | 'off';
+}>;
+
+export const patchConversation = (id: string, patch: MetaPatch) =>
+  fetch(`/api/conversations/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }).then((r) => json<Meta>(r));

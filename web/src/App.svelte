@@ -4,6 +4,7 @@
   import type { Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
+  import Settings from './Settings.svelte';
 
   let convs = $state<Meta[]>([]);
   let current = $state<Meta | null>(null);
@@ -16,6 +17,25 @@
   let scroller: HTMLElement | undefined = $state();
 
   const path = $derived(pathTo(messages, leaf));
+  let showSettings = $state(false);
+
+  /** Usage summed over the shown branch. */
+  const totals = $derived.by(() => {
+    let tokIn = 0, tokOut = 0, cached = 0, cost = 0;
+    for (const m of path) {
+      if (!m.usage) continue;
+      tokIn += m.usage.prompt_tokens;
+      tokOut += m.usage.completion_tokens;
+      cached += m.usage.cached_tokens;
+      cost += m.usage.cost ?? 0;
+    }
+    return { tokIn, tokOut, cached, cost };
+  });
+
+  function onSaved(m: Meta) {
+    current = m;
+    refreshList();
+  }
 
   async function refreshList() {
     convs = await api.listConversations();
@@ -25,6 +45,7 @@
     error = '';
     const c = await api.getConversation(id);
     current = c.meta;
+    showSettings = false;
     messages = c.messages;
     leaf = c.leaf;
     location.hash = id;
@@ -188,7 +209,22 @@
   </aside>
 
   <main>
-    <header>{current ? `${current.title} — ${current.model}` : 'chatport'}</header>
+    <header>
+      <span class="htitle">{current ? `${current.title} — ${current.model}` : 'chatport'}</span>
+      {#if current}
+        {#if totals.tokIn || totals.tokOut}
+          <span class="totals" title="Sum over the shown branch">
+            {totals.tokIn} in · {totals.tokOut} out{totals.cached ? ` · ${totals.cached} cached` : ''} · ${totals.cost.toFixed(4)}
+          </span>
+        {/if}
+        <button class="gear" title="Settings" onclick={() => (showSettings = !showSettings)}>⚙</button>
+      {/if}
+    </header>
+    {#if showSettings && current}
+      {#key current.id}
+        <Settings meta={current} onsaved={onSaved} onclose={() => (showSettings = false)} />
+      {/key}
+    {/if}
     <div class="msgs" bind:this={scroller}>
       {#each [...path, ...(streaming ? [streaming] : [])] as m (m.id || 'streaming')}
         <div class="msg {m.role}">
@@ -283,7 +319,17 @@
   }
   .del { background: none; border: none; color: #888; cursor: pointer; }
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  header { padding: 10px 16px; border-bottom: 1px solid #8884; font-weight: 600; }
+  header {
+    padding: 10px 16px;
+    border-bottom: 1px solid #8884;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .totals { font-weight: normal; font-size: 0.8em; color: #888; white-space: nowrap; }
+  .gear { background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1em; }
   .msgs { flex: 1; overflow-y: auto; padding: 16px; }
   .msg { max-width: 800px; margin: 0 auto 16px; }
   .msg.user .text {
