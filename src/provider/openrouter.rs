@@ -42,9 +42,13 @@ pub fn build_body(req: &ChatRequest) -> Value {
         let content = if markers { cached_text(s) } else { json!(s) };
         messages.push(json!({ "role": "system", "content": content }));
     }
-    let last_user = req.messages.iter().rposition(|m| m.role == Role::User);
+    // Breakpoint on the newest input: the user message, or a tool result mid-loop.
+    let last_input = req
+        .messages
+        .iter()
+        .rposition(|m| matches!(m.role, Role::User | Role::Tool));
     for (i, m) in req.messages.iter().enumerate() {
-        let content = if markers && Some(i) == last_user {
+        let content = if markers && Some(i) == last_input {
             cached_text(&m.content)
         } else if m.content.is_empty() && !m.tool_calls.is_empty() {
             Value::Null
@@ -392,6 +396,33 @@ mod tests {
             m[5],
             json!({ "role": "tool", "content": "hello", "tool_call_id": "t1" })
         );
+    }
+
+    #[test]
+    fn marker_moves_to_last_tool_result() {
+        let mut r = req("anthropic/claude-x", CachePolicy::Auto);
+        r.messages.push(ChatMessage {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "t1".into(),
+                name: "list_dir".into(),
+                arguments: "{}".into(),
+            }],
+            tool_call_id: None,
+        });
+        r.messages.push(ChatMessage {
+            role: Role::Tool,
+            content: "x".into(),
+            tool_calls: vec![],
+            tool_call_id: Some("t1".into()),
+        });
+        let b = build_body(&r);
+        let m = b["messages"].as_array().unwrap();
+        assert!(m[3]["content"].is_string(), "user msg no longer marked");
+        assert!(m[4]["content"].is_null());
+        assert_eq!(m[5]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(m[5]["tool_call_id"], "t1");
     }
 
     #[test]

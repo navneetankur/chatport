@@ -28,7 +28,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Message meta row: ‹n/m›, ↻ regen / ✎ edit icons, short line (model w/o vendor · cost), ⓘ toggles details (model, requested, provider, tokens, cost, time).
 - Reasoning: `delta.reasoning` → `ChatEvent::Reasoning` → message `reasoning` (stored, never sent back as context), SSE `reasoning {text}`. UI: collapsible "Thinking" block (open while thinking). `usage.reasoning_tokens` (part of completion) shown in details.
 - Reasoning effort: `meta.reasoning_effort` (enum max…none, unset = model default) → body `reasoning: {effort}`. Settings dropdown. PATCH `null` clears. Note: some models reject `none` with a 400 (reasoning mandatory) — surfaced as reply error, deliberately not auto-handled.
-- API keys: config `[[keys]] {name, key}` + `default_key` (default: first). `--key`/env override the default key only (or create "default"). `Config::resolve_keys` at startup, `key_for(name)` per request. `meta.key_name` (None = default) → `ChatRequest.key`; missing key = reply error. `GET /api/keys` returns names only. `/api/models` uses the default key. Settings shows a picker only when >1 key.
+- API keys: config `[[keys]] {name, key}` + `default_key` (default: first). `--keyfile`/env override the default key only (or create "default"). `Config::resolve_keys` at startup, `key_for(name)` per request. `meta.key_name` (None = default) → `ChatRequest.key`; missing key = reply error. `GET /api/keys` returns names only. `/api/models` uses the default key. Settings shows a picker only when >1 key.
 - Composer and inline edit share `web/src/MessageInput.svelte` (textarea, 📎, `@` chips + autocomplete, removable attachment chips; Enter submits, Esc cancels edit; buttons via `actions` snippet). App.svelte only owns send/edit/stop.
 - `@path` mentions: `web/src/mentions.ts` parses complete tokens (`@a.md ` ends at whitespace, `@"a b.md"` at the closing quote, no escapes; on send the trailing one counts too). Composer `$effect` on `input` → `GET /api/file?conv=&path=` (`src/files.rs`: `/abs`, `~/x`, else relative to `meta.file_root`; text only, 256 KB cap) → chips (ok / loading / error). × dismisses (text kept). `@` stays in the text; found files are sent as ordinary attachments named by the typed path. `config.default_file_root` seeds new chats; settings has "File root".
 - `@` autocomplete: `typingAt` finds the token at the cursor → 150 ms debounce → `GET /api/ls?conv=&prefix=` (`files::list`: dirs first, dot-entries only if typed, 50 max) → dropdown above the textarea. ↑/↓ or Tab/Shift+Tab move, Enter picks (dir keeps completing, file adds a space / closing quote → chip), Esc closes. Names with spaces get quoted.
@@ -51,7 +51,8 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [ ] Code blocks: syntax highlighting (highlight.js).
 - [x] File tools (list/read/write/edit in file root, auto-applied, diffs stored).
 - [ ] File tools UI: not yet clicked through in a browser (live-tested via curl only).
-- [ ] Anthropic cache marker sits on the last user msg; in long tool loops the rounds after it aren't cached. Revisit if Claude + tools gets used.
+- [x] Cache marker on the newest input (user or tool result), so tool loops cache per round.
+- [x] `--key` replaced by `--keyfile PATH` (argv is visible in ps).
 - [x] `@path` attachments: server-side text files, chip above the composer once the token is complete.
 - [x] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
 - [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
@@ -68,7 +69,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - No index.json: list = scan `meta.json` files.
 - Branching = message tree via `parent_id` in one file (not file-per-branch).
 - Attachments: text/md only, inline in message. Images later → `attachments/<hash>` refs.
-- Caching: explicit `cache_control` on system + last user msg for `anthropic/*` only; others (incl. Gemini) implicit.
+- Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
 
 ## Handoff notes
@@ -95,3 +96,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Edit can drop attachments (frontend only). Not clicked through in a browser yet.
 - 2026-11-21: Extracted MessageInput.svelte; edit now has 📎, `@` mentions and Enter-to-send. Not clicked through in a browser yet.
 - 2026-11-21: File tools. Live (Gemini 3.8 Flash, scratch root): list → read → edit → create in 5 rounds, diffs stored; follow-up rebuilt history from rounds; `../` refused and reported to the model; tools-off follow-up used folded history. 25 tests pass. UI typechecks, not seen in a browser.
+- 2026-11-21: `--keyfile` replaces `--key`. Cache marker moved to the last user/tool msg; live Haiku 4.5 tool loop: rounds 2–4 each read ~the whole previous prompt from cache (e.g. 10096/10185).
