@@ -363,6 +363,10 @@ fn generate(
                         record_model(&mut asst, &meta.model, m);
                         let _ = tx.send(ev("model", json!({ "model": &asst.model })));
                     }
+                    Ok(ChatEvent::Provider(p)) => {
+                        let _ = tx.send(ev("provider", json!({ "provider": &p })));
+                        asst.provider_name = Some(p);
+                    }
                     Ok(ChatEvent::Delta(t)) => {
                         asst.content.push_str(&t);
                         let _ = tx.send(ev("delta", json!({ "text": t })));

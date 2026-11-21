@@ -60,6 +60,9 @@ pub struct Message {
     /// Model id the request asked for, when it differs from `model` (e.g. a router like `openrouter/free`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_model: Option<String>,
+    /// Upstream provider that served the reply (e.g. "Nvidia").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     /// Stream ended early (error / abort). Content is whatever arrived.
@@ -80,6 +83,7 @@ impl Message {
             attachments,
             model: None,
             requested_model: None,
+            provider_name: None,
             usage: None,
             partial: false,
             error: None,

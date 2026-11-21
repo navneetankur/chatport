@@ -82,6 +82,11 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     {
         out.push(ChatEvent::Model(m.to_string()));
     }
+    if let Some(p) = v.get("provider").and_then(Value::as_str)
+        && !p.is_empty()
+    {
+        out.push(ChatEvent::Provider(p.to_string()));
+    }
     if let Some(t) = v
         .pointer("/choices/0/delta/content")
         .and_then(Value::as_str)
@@ -154,6 +159,7 @@ impl Provider for OpenRouter {
             let mut bytes = resp.bytes_stream();
             let mut buf: Vec<u8> = Vec::new();
             let mut last_model: Option<String> = None;
+            let mut last_provider: Option<String> = None;
             while let Some(chunk) = bytes.next().await {
                 let chunk = match chunk {
                     Ok(c) => c,
@@ -172,12 +178,20 @@ impl Provider for OpenRouter {
                     match parse_chunk(data.trim_start()) {
                         Ok(evs) => {
                             for ev in evs {
-                                // Every chunk repeats the model; forward it only when it changes.
-                                if let ChatEvent::Model(m) = &ev {
-                                    if last_model.as_ref() == Some(m) {
+                                // Every chunk repeats model/provider; forward them only when they change.
+                                let last = match &ev {
+                                    ChatEvent::Model(_) => Some(&mut last_model),
+                                    ChatEvent::Provider(_) => Some(&mut last_provider),
+                                    _ => None,
+                                };
+                                if let Some(last) = last {
+                                    let (ChatEvent::Model(v) | ChatEvent::Provider(v)) = &ev else {
+                                        unreachable!()
+                                    };
+                                    if last.as_ref() == Some(v) {
                                         continue;
                                     }
-                                    last_model = Some(m.clone());
+                                    *last = Some(v.clone());
                                 }
                                 let done = matches!(ev, ChatEvent::Done);
                                 if tx.send(Ok(ev)).is_err() || done {

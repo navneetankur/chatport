@@ -24,7 +24,9 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Attachments: 📎 in composer reads .txt/.md client-side (2 MB cap), chips removable; edit re-sends the original attachments.
 - Title: server sets it on the first message of a "New chat" (`api::title_from`: first non-empty line → attachment name → conv id, 20 chars + …). Rename: ✎ in sidebar (or dbl-click) → PATCH title.
 - Theme: CSS vars on `:root` in App.svelte (light/dark), global styles for button/textarea/input/select; `.primary` / submit = accent blue.
-- Actual model: `ChatEvent::Model` from chunk `model` (deduped in provider task) → assistant `model`; `requested_model` set only when it differs. SSE `model {model}` event. UI: `actual (via requested)`.
+- Actual model: `ChatEvent::Model` from chunk `model` (deduped in provider task) → assistant `model`; `requested_model` set only when it differs. SSE `model {model}` event. Also `provider` from chunks → `provider_name` (SSE `provider` event).
+- Message meta row: ‹n/m›, ↻ regen / ✎ edit icons, short line (model w/o vendor · cost), ⓘ toggles details (model, requested, provider, tokens, cost, time).
+- `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
@@ -61,3 +63,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Milestone 6 (stop + attachments). Live-tested via curl: stop mid-stream → partial saved; attachment content reaches the model. Next: the 3 UI TODOs (colors, title from first msg, rename).
 - 2026-11-21: Auto-title from first msg, rename, dark-theme control colors (replaced unstyled default controls). Curl-tested title + rename. Colors need a look in the browser.
 - 2026-11-21: Record actual model. Live: `openrouter/free` → `nvidia/nemotron-3.5-super-vl:free`, requested_model kept. Remaining backlog: Haiku cache-hit check.
+- 2026-11-21: Provider name captured from stream; compact meta row + details toggle. Live: openrouter/free → baidu/ernie-5.5-flash-preview:free via Baidu. Not yet seen in a browser.

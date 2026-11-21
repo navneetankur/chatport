@@ -54,6 +54,8 @@ pub struct ChatRequest {
 pub enum ChatEvent {
     /// Model that actually serves the request (may differ from the requested id, e.g. routers).
     Model(String),
+    /// Upstream provider serving the request (e.g. "Nvidia").
+    Provider(String),
     Delta(String),
     Usage(Usage),
     Done,

@@ -202,6 +202,9 @@
           case 'model':
             if (streaming) streaming.model = e.data.model;
             break;
+          case 'provider':
+            if (streaming) streaming.provider_name = e.data.provider;
+            break;
           case 'delta':
             if (streaming) streaming.content += e.data.text;
             break;
@@ -234,15 +237,28 @@
     }
   }
 
-  function usageLine(m: Message): string {
-    const u = m.usage;
-    const model = m.requested_model ? `${m.model} (via ${m.requested_model})` : m.model;
-    if (!u) return model ?? '';
-    const parts = [model, `${u.prompt_tokens} in`, `${u.completion_tokens} out`];
-    if (u.cached_tokens) parts.push(`${u.cached_tokens} cached`);
-    if (u.cost != null) parts.push(`$${u.cost.toFixed(5)}`);
-    return parts.filter(Boolean).join(' · ');
+  /** Short line: model name without vendor prefix, plus cost. */
+  function shortLine(m: Message): string {
+    const name = m.model?.split('/').pop();
+    const cost = m.usage?.cost != null ? `$${m.usage.cost.toFixed(4)}` : '';
+    return [name, cost].filter(Boolean).join(' · ');
   }
+
+  /** Details rows for the ⓘ toggle. */
+  function details(m: Message): [string, string][] {
+    const u = m.usage;
+    const rows: [string, string | undefined][] = [
+      ['Model', m.model],
+      ['Requested', m.requested_model],
+      ['Provider', m.provider_name],
+      ['Tokens', u && `${u.prompt_tokens} in · ${u.completion_tokens} out` + (u.cached_tokens ? ` · ${u.cached_tokens} cached` : '')],
+      ['Cost', u?.cost != null ? `$${u.cost.toFixed(6)}` : undefined],
+      ['Time', new Date(m.created_at).toLocaleString()],
+    ];
+    return rows.filter((r): r is [string, string] => !!r[1]);
+  }
+
+  let openDetails = $state<Record<string, boolean>>({});
 
   onMount(async () => {
     try {
@@ -331,12 +347,24 @@
                 </span>
               {/if}
               {#if m.role === 'user'}
-                <button onclick={() => startEdit(m)} disabled={busy}>Edit</button>
+                <button class="icon" title="Edit" onclick={() => startEdit(m)} disabled={busy}>✎</button>
               {:else}
-                <button onclick={() => regen(m)} disabled={busy}>Regenerate</button>
-                <span>{usageLine(m)}</span>
+                <button class="icon" title="Regenerate" onclick={() => regen(m)} disabled={busy}>↻</button>
+                <span>{shortLine(m)}</span>
+                <button
+                  class="icon"
+                  title="Details"
+                  class:on={openDetails[m.id]}
+                  onclick={() => (openDetails[m.id] = !openDetails[m.id])}>ⓘ</button>
               {/if}
             </div>
+            {#if openDetails[m.id]}
+              <dl class="details">
+                {#each details(m) as [k, v]}
+                  <dt>{k}</dt><dd>{v}</dd>
+                {/each}
+              </dl>
+            {/if}
           {:else if m === streaming}
             <div class="meta">streaming…</div>
           {/if}
@@ -493,6 +521,20 @@
     padding: 0 2px;
   }
   .meta button:disabled { opacity: 0.4; cursor: default; }
+  .meta .icon { font-size: 1.15em; line-height: 1; }
+  .meta .icon.on { color: var(--accent); }
+  .details {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 12px;
+    margin: 6px 0 0;
+    padding: 6px 10px;
+    font-size: 0.8em;
+    color: #888;
+    border-left: 2px solid var(--border);
+  }
+  .details dt { font-weight: 600; }
+  .details dd { margin: 0; overflow-wrap: anywhere; }
   .edit { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
   .err { color: #c44; margin-top: 4px; }
