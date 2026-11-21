@@ -1,8 +1,11 @@
+#![allow(clippy::needless_return)] // house style: explicit return in multi-statement fns
+
 mod api;
 mod config;
 mod provider;
 mod store;
 mod tree;
+mod web;
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -74,9 +77,7 @@ async fn main() -> Result<()> {
         config: cfg.clone(),
     });
 
-    // TODO(milestone 3): serve embedded Svelte build here.
-    let app = api::router(state)
-        .fallback(|| async { "chatport: frontend not built yet; API under /api" });
+    let app = api::router(state).fallback(web::static_handler);
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind)
         .await

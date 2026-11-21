@@ -1,7 +1,7 @@
 # Tracker
 
 ## Status
-Milestones 1–2 (backend + tree logic) done. Frontend not started.
+Milestones 1–2 done. Frontend scaffolded + embedded; UI itself not started.
 
 ## Milestones
 - [x] 1. Backend skeleton: config, OpenRouter streaming, JSONL storage, SSE API
@@ -12,11 +12,13 @@ Milestones 1–2 (backend + tree logic) done. Frontend not started.
 - [ ] 6. Attachments UI, stop button
 
 ## Next session — start here
-1. **Prereq:** `sudo pacman -S npm` (node v26 present, no npm/pnpm/bun on this machine).
-2. Scaffold `web/` with Vite + Svelte + TS. Vite dev server proxies `/api` → `127.0.0.1:8787`.
-3. Embed `web/dist` in the binary (`rust-embed` or `include_dir`), serve at `/` with SPA fallback; replace the placeholder `fallback` in `src/main.rs`.
-4. Client SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
-5. Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
+- Done: `web/` = Vite 8 + Svelte 5 + TS 6 (TS 7 breaks svelte-check; keep `~6`). Dev: `cd web && npm run dev` (proxies `/api` → 8787). `npm run check` = typecheck.
+- Done: `src/web.rs` embeds `web/dist` via rust-embed, SPA fallback to index.html (404 for missing `/assets/*`, `/api/*`).
+- Build: `tools/build.sh [--release] [--force]` (npm install if needed, web build only if `web/` newer than `dist/index.html`, then cargo). `tools/run.sh [--release] [chatport args]`.
+- `web/dist` must exist for `cargo build` (rust-embed) — use tools/build.sh.
+1. Build the UI in `web/src/App.svelte` (placeholder now).
+2. Client SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
+3. Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
@@ -42,3 +44,4 @@ Milestones 1–2 (backend + tree logic) done. Frontend not started.
 ## Handoff notes
 - 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
 - 2026-11-21: Added `--key` flag. Live test passed with `openrouter/free`. Auto-title deferred.
+- 2026-11-21: Scaffolded web/ (Svelte 5/Vite/TS6), embedded via rust-embed, added tools/build.sh + run.sh. Smoke-tested `/`, SPA fallback, `/api`.
