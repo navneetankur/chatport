@@ -251,18 +251,23 @@
   let editing = $state<string | null>(null);
   let editText = $state('');
 
+  /** Attachments kept for the edited message; × removes one. */
+  let editAtts = $state<Attachment[]>([]);
+
   function startEdit(m: Message) {
     editing = m.id;
     editText = m.content;
+    editAtts = [...(m.attachments ?? [])];
   }
 
   async function submitEdit(m: Message) {
     const text = editText.trim();
-    if ((!text && !m.attachments?.length) || busy) return;
+    const atts = editAtts;
+    if ((!text && !atts.length) || busy) return;
     editing = null;
     // Hide the old branch while the new one streams.
     leaf = m.parent_id;
-    await run((conv, on) => api.sendMessage(conv.id, m.parent_id, text, m.attachments ?? [], on));
+    await run((conv, on) => api.sendMessage(conv.id, m.parent_id, text, atts, on));
   }
 
   async function regen(m: Message) {
@@ -452,15 +457,21 @@
             {#if editing === m.id}
               <textarea class="edit" bind:value={editText} rows="4"></textarea>
               <div class="actions">
-                <button onclick={() => submitEdit(m)} disabled={busy || !editText.trim()}>Send</button>
+                <button onclick={() => submitEdit(m)} disabled={busy || (!editText.trim() && !editAtts.length)}>Send</button>
                 <button onclick={() => (editing = null)}>Cancel</button>
               </div>
             {:else}
               <div class="text plain">{m.content}</div>
             {/if}
-            {#each m.attachments ?? [] as a}
-              <div class="att">📎 {a.name}</div>
-            {/each}
+            {#if editing === m.id}
+              {#each editAtts as a, i}
+                <div class="att">📎 {a.name} <button class="att-x" title="Remove from edit" onclick={() => editAtts.splice(i, 1)}>×</button></div>
+              {/each}
+            {:else}
+              {#each m.attachments ?? [] as a}
+                <div class="att">📎 {a.name}</div>
+              {/each}
+            {/if}
           {:else}
             {#if m.reasoning}
               <details class="thinking" open={m === streaming && !m.content}>
@@ -733,6 +744,7 @@
   .chip { background: #8882; border-radius: 12px; padding: 2px 8px; }
   .chip.at { background: #4a8af433; }
   .chip.at-err { background: #e5484d33; max-width: 100%; overflow-wrap: anywhere; }
+  .att-x { background: none; border: none; color: #888; cursor: pointer; padding: 0 4px; }
   .chip button { background: none; border: none; color: #888; cursor: pointer; }
   form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; position: relative; }
   .comp {

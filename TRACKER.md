@@ -49,7 +49,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [ ] Code blocks: syntax highlighting (highlight.js).
 - [x] `@path` attachments: server-side text files, chip above the composer once the token is complete.
 - [x] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
-- [ ] Editing a user message can't remove its attachments (edit re-sends the original ones unchanged).
+- [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
@@ -87,3 +87,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Optional HTTP Basic auth (`[auth] user/password`; off + startup warning when absent). Middleware precomputes the header with `base64` (already in tree via reqwest). curl: none/wrong → 401 + WWW-Authenticate, right → 200 for API and static. Not yet tried in a browser (SSE fetch should resend creds same-origin).
 - 2026-11-21: `@path` file attachments (no autocomplete yet). Tests for resolve/read; curl: relative/abs/missing/dir/no-root all as expected; parser checked in node. Not clicked through in a browser yet.
 - 2026-11-21: `@` autocomplete. Tests for `files::list`; curl `ls` for root/sub/abs/~; parser checked in node. Not clicked through in a browser yet.
+- 2026-11-21: Edit can drop attachments (frontend only). Not clicked through in a browser yet.
