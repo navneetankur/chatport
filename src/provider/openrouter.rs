@@ -136,7 +136,7 @@ impl Provider for OpenRouter {
             .http
             .post(format!("{BASE}/chat/completions"))
             .bearer_auth(&self.key)
-            .header("X-Title", "chat")
+            .header("X-Title", "chatport")
             .json(&build_body(&req))
             .send()
             .await?;

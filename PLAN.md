@@ -18,7 +18,7 @@ Self-hosted chat UI for LLMs via OpenRouter. Runs on one machine (started on dem
 ## Layout
 
 ```
-chat/
+chatport/
   Cargo.toml
   src/
     main.rs          # config, router, startup
@@ -35,11 +35,11 @@ chat/
 
 ## Config
 
-`config.toml` (path via `--config`, default `~/.config/chat/config.toml`):
+`config.toml` (path via `--config`, default `~/.config/chatport/config.toml`):
 
 ```toml
 bind = "0.0.0.0:8787"
-data_dir = "~/.local/share/chat"
+data_dir = "~/.local/share/chatport"
 openrouter_api_key = "..."        # or env OPENROUTER_API_KEY (env wins)
 default_model = "anthropic/claude-sonnet-4.5"
 

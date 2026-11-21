@@ -40,5 +40,5 @@ Milestones 1–2 (backend + tree logic) done. Frontend not started.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
 
 ## Handoff notes
-- 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project currently in `workspace/temp/chat`; user will move it.
+- 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
 - 2026-11-21: Added `--key` flag. Live test passed with `openrouter/free`. Auto-title deferred.

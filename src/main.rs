@@ -40,8 +40,8 @@ fn parse_args() -> Result<Args> {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: chat [--config PATH] [--key KEY]\n  \
-                     config default: ~/.config/chat/config.toml\n  \
+                    "usage: chatport [--config PATH] [--key KEY]\n  \
+                     config default: ~/.config/chatport/config.toml\n  \
                      key priority: --key > OPENROUTER_API_KEY > config"
                 );
                 std::process::exit(0);
@@ -75,8 +75,8 @@ async fn main() -> Result<()> {
     });
 
     // TODO(milestone 3): serve embedded Svelte build here.
-    let app =
-        api::router(state).fallback(|| async { "chat: frontend not built yet; API under /api" });
+    let app = api::router(state)
+        .fallback(|| async { "chatport: frontend not built yet; API under /api" });
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind)
         .await

@@ -22,7 +22,7 @@ fn default_bind() -> String {
     "0.0.0.0:8787".into()
 }
 fn default_data_dir() -> String {
-    "~/.local/share/chat".into()
+    "~/.local/share/chatport".into()
 }
 fn default_model() -> String {
     "anthropic/claude-sonnet-4.5".into()
@@ -39,7 +39,7 @@ pub fn expand_tilde(p: &str) -> PathBuf {
 pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
     let (path, required) = match explicit {
         Some(p) => (p, true),
-        None => (expand_tilde("~/.config/chat/config.toml"), false),
+        None => (expand_tilde("~/.config/chatport/config.toml"), false),
     };
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,

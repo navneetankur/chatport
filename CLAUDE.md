@@ -1,4 +1,4 @@
-# chat — preamble for new sessions
+# chatport — preamble for new sessions
 
 Personal LAN chat server for LLMs via OpenRouter. Single user, started on demand.
 Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embedded in the binary.
@@ -14,11 +14,11 @@ Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embed
 
 ## Commands
 - `cargo test` — unit tests (tree, request body/caching, SSE parsing, flatten)
-- `cargo build && ./target/debug/chat -c config.toml` — run (see `config.example.toml`)
+- `cargo build && ./target/debug/chatport -c config.toml` — run (see `config.example.toml`)
 - Key priority: `--key` > `OPENROUTER_API_KEY` env > config.
 
 ## Live testing
-- Key is in `key.txt` (gitignored). Run: `./target/debug/chat -c <cfg> --key "$(cat key.txt)"`. Never print/log the key.
+- Key is in `key.txt` (gitignored). Run: `./target/debug/chatport -c <cfg> --key "$(cat key.txt)"`. Never print/log the key.
 - Use a throwaway config in the session scratchpad (own `bind` port + `data_dir`), not the real data dir.
 - Model: `openrouter/free` by default. Only when a test needs a specific provider, use the cheapest fitting one (e.g. Claude Haiku for Anthropic cache markers). Check exact ids via `/api/models`.
 
