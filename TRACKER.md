@@ -1,13 +1,13 @@
 # Tracker
 
 ## Status
-Milestones 1–2 done. Frontend scaffolded + embedded; UI itself not started.
+Milestones 1–3 done. Basic UI works (list, chat, streaming, markdown).
 
 ## Milestones
 - [x] 1. Backend skeleton: config, OpenRouter streaming, JSONL storage, SSE API
 - [x] 2. Tree logic: edit / regenerate / switch leaf (+ unit tests)
-- [ ] 3. Svelte UI: conversation list, chat view, streaming, markdown  ← **NEXT**
-- [ ] 4. Branch switcher `‹ 2/3 ›`, edit / regenerate buttons
+- [x] 3. Svelte UI: conversation list, chat view, streaming, markdown
+- [ ] 4. Branch switcher `‹ 2/3 ›`, edit / regenerate buttons  ← **NEXT**
 - [ ] 5. Settings panel: model picker, system prompt, provider options, cache toggle, usage/cost display
 - [ ] 6. Attachments UI, stop button
 
@@ -16,9 +16,10 @@ Milestones 1–2 done. Frontend scaffolded + embedded; UI itself not started.
 - Done: `src/web.rs` embeds `web/dist` via rust-embed, SPA fallback to index.html (404 for missing `/assets/*`, `/api/*`).
 - Build: `tools/build.sh [--release] [--force]` (npm install if needed, web build only if `web/` newer than `dist/index.html`, then cargo). `tools/run.sh [--release] [chatport args]`.
 - `web/dist` must exist for `cargo build` (rust-embed) — use tools/build.sh.
-1. Build the UI in `web/src/App.svelte` (placeholder now).
-2. Client SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
-3. Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
+- UI: `App.svelte` (all views), `api.ts` (fetch + SSE reader over POST), `tree.ts` (`pathTo`), `markdown.ts` (marked + DOMPurify). Open conv in URL hash.
+- Milestone 4: add siblings/branch switcher to `tree.ts`, call `POST /leaf`, `/regenerate` (needs `regenerate` in api.ts), edit = send with the edited msg's parent_id.
+- SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
+- Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
@@ -45,3 +46,4 @@ Milestones 1–2 done. Frontend scaffolded + embedded; UI itself not started.
 - 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
 - 2026-11-21: Added `--key` flag. Live test passed with `openrouter/free`. Auto-title deferred.
 - 2026-11-21: Scaffolded web/ (Svelte 5/Vite/TS6), embedded via rust-embed, added tools/build.sh + run.sh. Smoke-tested `/`, SPA fallback, `/api`.
+- 2026-11-21: Milestone 3 UI. svelte-check clean; live-tested send/stream via scratch config. Not yet clicked through in a real browser.
