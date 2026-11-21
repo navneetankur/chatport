@@ -60,6 +60,32 @@
     await open(m.id);
   }
 
+  let renaming = $state<string | null>(null);
+  let renameText = $state('');
+
+  function startRename(c: Meta) {
+    renaming = c.id;
+    renameText = c.title;
+  }
+
+  async function submitRename() {
+    const id = renaming;
+    const title = renameText.trim();
+    renaming = null;
+    if (!id || !title) return;
+    try {
+      await api.patchConversation(id, { title });
+      await refreshList();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  function focus(el: HTMLInputElement) {
+    el.focus();
+    el.select();
+  }
+
   async function remove(id: string) {
     if (!confirm('Delete this conversation?')) return;
     await api.deleteConversation(id);
@@ -231,8 +257,22 @@
     <ul>
       {#each convs as c (c.id)}
         <li class:active={current?.id === c.id}>
-          <button class="title" onclick={() => open(c.id)}>{c.title}</button>
-          <button class="del" title="Delete" onclick={() => remove(c.id)}>×</button>
+          {#if renaming === c.id}
+            <input
+              class="rename"
+              bind:value={renameText}
+              use:focus
+              onblur={submitRename}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') submitRename();
+                else if (e.key === 'Escape') renaming = null;
+              }}
+            />
+          {:else}
+            <button class="title" onclick={() => open(c.id)} ondblclick={() => startRename(c)}>{c.title}</button>
+            <button class="del" title="Rename" onclick={() => startRename(c)}>✎</button>
+            <button class="del" title="Delete" onclick={() => remove(c.id)}>×</button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -333,17 +373,60 @@
 </div>
 
 <style>
+  :global(:root) {
+    color-scheme: light dark;
+    --bg: #f6f6f4;
+    --fg: #222;
+    --field: #fff;
+    --border: #c8c8c4;
+    --btn: #e6e6e2;
+    --accent: #3b6fd8;
+    --accent-fg: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root) {
+      --bg: #1b1b1d;
+      --fg: #ddd;
+      --field: #26262a;
+      --border: #3a3a40;
+      --btn: #2f2f35;
+      --accent: #4a6fb3;
+      --accent-fg: #f0f0f0;
+    }
+  }
   :global(html, body) {
     margin: 0;
     height: 100%;
     font-family: system-ui, sans-serif;
-    background: #f6f6f4;
-    color: #222;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  :global(textarea, input:not([type='checkbox']), select) {
+    background: var(--field);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  :global(textarea:focus, input:focus, select:focus) {
+    outline: 1px solid var(--accent);
+    border-color: var(--accent);
+  }
+  :global(button) {
+    background: var(--btn);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+  }
+  :global(button:disabled) { opacity: 0.5; cursor: default; }
+  :global(button.primary, form button[type='submit']) {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
   }
   :global(#app) { height: 100%; }
-  @media (prefers-color-scheme: dark) {
-    :global(html, body) { background: #1b1b1d; color: #ddd; }
-  }
   .app { display: flex; height: 100%; }
   aside {
     width: 240px;
@@ -368,7 +451,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .del { background: none; border: none; color: #888; cursor: pointer; }
+  .del { background: none; border: none; color: #888; cursor: pointer; padding: 0 6px; }
+  .rename { flex: 1; margin: 4px 6px; padding: 4px 6px; font: inherit; }
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   header {
     padding: 10px 16px;
