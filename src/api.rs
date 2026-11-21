@@ -40,7 +40,10 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/models", get(models))
         .route("/api/conversations", get(list).post(create))
-        .route("/api/conversations/{id}", get(get_conv).patch(patch_conv).delete(delete_conv))
+        .route(
+            "/api/conversations/{id}",
+            get(get_conv).patch(patch_conv).delete(delete_conv),
+        )
         .route("/api/conversations/{id}/messages", post(send))
         .route("/api/conversations/{id}/regenerate", post(regenerate))
         .route("/api/conversations/{id}/leaf", post(set_leaf))
@@ -83,7 +86,10 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
 }
 
 fn load_meta(s: &AppState, id: &str) -> R<Meta> {
-    s.store.meta(id).map_err(|_| not_found())?.ok_or_else(not_found)
+    s.store
+        .meta(id)
+        .map_err(|_| not_found())?
+        .ok_or_else(not_found)
 }
 
 #[derive(Serialize)]
@@ -99,7 +105,11 @@ async fn get_conv(State(s): St, Path(id): Path<String>) -> R<Json<ConvResp>> {
     let meta = load_meta(&s, &id)?;
     let messages = s.store.messages(&id)?;
     let leaf = tree::resolve_leaf(&messages, meta.leaf.as_deref());
-    Ok(Json(ConvResp { meta, leaf, messages }))
+    Ok(Json(ConvResp {
+        meta,
+        leaf,
+        messages,
+    }))
 }
 
 /// Absent field = unchanged. `provider: null` / `system: ""` clear.
@@ -116,7 +126,11 @@ fn some_value<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D
     Value::deserialize(d).map(Some)
 }
 
-async fn patch_conv(State(s): St, Path(id): Path<String>, Json(r): Json<PatchReq>) -> R<Json<Meta>> {
+async fn patch_conv(
+    State(s): St,
+    Path(id): Path<String>,
+    Json(r): Json<PatchReq>,
+) -> R<Json<Meta>> {
     let mut meta = load_meta(&s, &id)?;
     if let Some(t) = r.title {
         meta.title = t;
@@ -173,13 +187,19 @@ struct SendReq {
 }
 
 /// New user message (also used for edits: same parent as the edited one). Streams reply.
-async fn send(State(s): St, Path(id): Path<String>, Json(r): Json<SendReq>) -> R<impl IntoResponse> {
+async fn send(
+    State(s): St,
+    Path(id): Path<String>,
+    Json(r): Json<SendReq>,
+) -> R<impl IntoResponse> {
     let mut meta = load_meta(&s, &id)?;
     let mut msgs = s.store.messages(&id)?;
     if let Some(p) = &r.parent_id {
         match msgs.iter().find(|m| &m.id == p) {
             None => return Err(bad("unknown parent_id")),
-            Some(m) if m.role != Role::Assistant => return Err(bad("parent must be an assistant message")),
+            Some(m) if m.role != Role::Assistant => {
+                return Err(bad("parent must be an assistant message"));
+            }
             _ => {}
         }
     }
@@ -201,7 +221,11 @@ struct RegenReq {
     user_id: String,
 }
 
-async fn regenerate(State(s): St, Path(id): Path<String>, Json(r): Json<RegenReq>) -> R<impl IntoResponse> {
+async fn regenerate(
+    State(s): St,
+    Path(id): Path<String>,
+    Json(r): Json<RegenReq>,
+) -> R<impl IntoResponse> {
     let meta = load_meta(&s, &id)?;
     let msgs = s.store.messages(&id)?;
     let user = match msgs.iter().find(|m| m.id == r.user_id) {
@@ -213,7 +237,10 @@ async fn regenerate(State(s): St, Path(id): Path<String>, Json(r): Json<RegenReq
 }
 
 fn ev(name: &str, data: impl Serialize) -> Event {
-    Event::default().event(name).json_data(data).unwrap_or_else(|_| Event::default().event(name))
+    Event::default()
+        .event(name)
+        .json_data(data)
+        .unwrap_or_else(|_| Event::default().event(name))
 }
 
 /// Fence that can't be closed by backticks inside `content`.
@@ -256,7 +283,10 @@ fn generate(
         messages: tree::path(&msgs, &user.id)
             .into_iter()
             .filter(|m| !(m.role == Role::Assistant && m.content.is_empty()))
-            .map(|m| ChatMessage { role: m.role, content: flatten(m) })
+            .map(|m| ChatMessage {
+                role: m.role,
+                content: flatten(m),
+            })
             .collect(),
         options: meta.provider.clone(),
         cache: meta.cache,
@@ -322,7 +352,10 @@ mod tests {
         let m = Message::user(
             None,
             "explain".into(),
-            vec![Attachment { name: "a.md".into(), content: "x ```` y".into() }],
+            vec![Attachment {
+                name: "a.md".into(),
+                content: "x ```` y".into(),
+            }],
         );
         let f = flatten(&m);
         assert!(f.starts_with("File: a.md\n`````\n"));

@@ -17,7 +17,11 @@ pub struct OpenRouter {
 
 impl OpenRouter {
     pub fn new(key: String) -> Self {
-        Self { key, http: reqwest::Client::new(), models: Mutex::new(None) }
+        Self {
+            key,
+            http: reqwest::Client::new(),
+            models: Mutex::new(None),
+        }
     }
 }
 
@@ -39,8 +43,11 @@ pub fn build_body(req: &ChatRequest) -> Value {
     }
     let last_user = req.messages.iter().rposition(|m| m.role == Role::User);
     for (i, m) in req.messages.iter().enumerate() {
-        let content =
-            if markers && Some(i) == last_user { cached_text(&m.content) } else { json!(m.content) };
+        let content = if markers && Some(i) == last_user {
+            cached_text(&m.content)
+        } else {
+            json!(m.content)
+        };
         messages.push(json!({ "role": m.role, "content": content }));
     }
     let mut body = json!({
@@ -62,10 +69,18 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     }
     let v: Value = serde_json::from_str(data).context("bad SSE json")?;
     if let Some(err) = v.get("error") {
-        bail!("provider error: {}", err.get("message").and_then(Value::as_str).unwrap_or(&err.to_string()));
+        bail!(
+            "provider error: {}",
+            err.get("message")
+                .and_then(Value::as_str)
+                .unwrap_or(&err.to_string())
+        );
     }
     let mut out = Vec::new();
-    if let Some(t) = v.pointer("/choices/0/delta/content").and_then(Value::as_str) {
+    if let Some(t) = v
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+    {
         if !t.is_empty() {
             out.push(ChatEvent::Delta(t.to_string()));
         }
@@ -146,7 +161,9 @@ impl Provider for OpenRouter {
                 while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
                     let line: Vec<u8> = buf.drain(..=pos).collect();
                     let line = String::from_utf8_lossy(&line);
-                    let Some(data) = line.trim_end().strip_prefix("data:") else { continue };
+                    let Some(data) = line.trim_end().strip_prefix("data:") else {
+                        continue;
+                    };
                     match parse_chunk(data.trim_start()) {
                         Ok(evs) => {
                             for ev in evs {
@@ -179,9 +196,18 @@ mod tests {
             model: model.into(),
             system: Some("sys".into()),
             messages: vec![
-                ChatMessage { role: Role::User, content: "a".into() },
-                ChatMessage { role: Role::Assistant, content: "b".into() },
-                ChatMessage { role: Role::User, content: "c".into() },
+                ChatMessage {
+                    role: Role::User,
+                    content: "a".into(),
+                },
+                ChatMessage {
+                    role: Role::Assistant,
+                    content: "b".into(),
+                },
+                ChatMessage {
+                    role: Role::User,
+                    content: "c".into(),
+                },
             ],
             options: Some(json!({ "order": ["anthropic"] })),
             cache,
@@ -205,7 +231,13 @@ mod tests {
             build_body(&req("openai/gpt-x", CachePolicy::Auto)),
             build_body(&req("google/gemini-x", CachePolicy::Auto)),
         ] {
-            assert!(b["messages"].as_array().unwrap().iter().all(|m| m["content"].is_string()));
+            assert!(
+                b["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|m| m["content"].is_string())
+            );
         }
     }
 
@@ -217,7 +249,9 @@ mod tests {
             r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":8},"cost":0.01}}"#,
         )
         .unwrap();
-        assert!(matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.cost == Some(0.01)));
+        assert!(
+            matches!(&ev[0], ChatEvent::Usage(u) if u.cached_tokens == 8 && u.cost == Some(0.01))
+        );
         assert!(matches!(parse_chunk("[DONE]").unwrap()[0], ChatEvent::Done));
         assert!(parse_chunk(r#"{"error":{"message":"nope"}}"#).is_err());
     }

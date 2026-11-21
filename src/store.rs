@@ -104,7 +104,10 @@ impl Store {
     pub fn open(data_dir: PathBuf) -> Result<Self> {
         let root = data_dir.join("conversations");
         std::fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
-        Ok(Self { root, write: Mutex::new(()) })
+        Ok(Self {
+            root,
+            write: Mutex::new(()),
+        })
     }
 
     fn dir(&self, id: &str) -> Result<PathBuf> {
@@ -118,7 +121,10 @@ impl Store {
         let mut out = Vec::new();
         for e in std::fs::read_dir(&self.root)? {
             let path = e?.path().join("meta.json");
-            match std::fs::read(&path).map_err(anyhow::Error::from).and_then(|b| Ok(serde_json::from_slice(&b)?)) {
+            match std::fs::read(&path)
+                .map_err(anyhow::Error::from)
+                .and_then(|b| Ok(serde_json::from_slice(&b)?))
+            {
                 Ok(m) => out.push(m),
                 Err(err) => tracing::warn!("skipping {}: {err:#}", path.display()),
             }

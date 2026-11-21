@@ -21,11 +21,23 @@ struct Args {
 
 fn parse_args() -> Result<Args> {
     let mut args = std::env::args().skip(1);
-    let mut out = Args { config: None, key: None };
+    let mut out = Args {
+        config: None,
+        key: None,
+    };
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--config" | "-c" => out.config = Some(PathBuf::from(args.next().context("--config needs a path")?)),
-            "--key" => out.key = Some(args.next().context("--key needs a value")?.trim().to_string()),
+            "--config" | "-c" => {
+                out.config = Some(PathBuf::from(args.next().context("--config needs a path")?))
+            }
+            "--key" => {
+                out.key = Some(
+                    args.next()
+                        .context("--key needs a value")?
+                        .trim()
+                        .to_string(),
+                )
+            }
             "--help" | "-h" => {
                 println!(
                     "usage: chat [--config PATH] [--key KEY]\n  \
@@ -63,9 +75,12 @@ async fn main() -> Result<()> {
     });
 
     // TODO(milestone 3): serve embedded Svelte build here.
-    let app = api::router(state).fallback(|| async { "chat: frontend not built yet; API under /api" });
+    let app =
+        api::router(state).fallback(|| async { "chat: frontend not built yet; API under /api" });
 
-    let listener = tokio::net::TcpListener::bind(&cfg.bind).await.with_context(|| format!("binding {}", cfg.bind))?;
+    let listener = tokio::net::TcpListener::bind(&cfg.bind)
+        .await
+        .with_context(|| format!("binding {}", cfg.bind))?;
     tracing::info!("listening on http://{}", cfg.bind);
     axum::serve(listener, app).await?;
     Ok(())

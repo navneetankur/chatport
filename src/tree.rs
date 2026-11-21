@@ -25,7 +25,11 @@ pub fn path<'a>(msgs: &'a [Message], leaf: &str) -> Vec<&'a Message> {
 pub fn latest_descendant(msgs: &[Message], id: &str) -> String {
     let mut cur = id.to_string();
     for _ in 0..=msgs.len() {
-        match msgs.iter().rev().find(|m| m.parent_id.as_deref() == Some(cur.as_str())) {
+        match msgs
+            .iter()
+            .rev()
+            .find(|m| m.parent_id.as_deref() == Some(cur.as_str()))
+        {
             Some(c) => cur = c.id.clone(),
             None => break,
         }
