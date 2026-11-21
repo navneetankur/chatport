@@ -41,7 +41,7 @@ chatport/
 bind = "0.0.0.0:8787"
 data_dir = "~/.local/share/chatport"
 [[keys]]                          # named keys, picked per conversation
-name = "personal"                 # --key / OPENROUTER_API_KEY override the default key
+name = "personal"                 # --keyfile / OPENROUTER_API_KEY override the default key
 key = "..."
 default_model = "anthropic/claude-sonnet-4.5"
 

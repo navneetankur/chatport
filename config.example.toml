@@ -1,7 +1,7 @@
 bind = "0.0.0.0:8787"
 data_dir = "~/.local/share/chatport"
 # Named API keys; pick one per conversation in chat settings.
-# --key / env OPENROUTER_API_KEY override the default key (or create one named "default").
+# --keyfile / env OPENROUTER_API_KEY override the default key (or create one named "default").
 # default_key = "personal"   # default: first entry
 # [[keys]]
 # name = "personal"

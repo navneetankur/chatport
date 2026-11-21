@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build if needed, then run. Extra args go to chatport (e.g. -c config.toml --key ...).
+# Build if needed, then run. Extra args go to chatport (e.g. -c config.toml --keyfile key.txt).
 # Usage: tools/run.sh [--release] [chatport args...]
 set -euo pipefail
 cd "$(dirname "$0")/.."

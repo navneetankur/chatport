@@ -24,33 +24,32 @@ pub struct AppState {
 
 struct Args {
     config: Option<PathBuf>,
-    key: Option<String>,
+    keyfile: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args> {
     let mut args = std::env::args().skip(1);
     let mut out = Args {
         config: None,
-        key: None,
+        keyfile: None,
     };
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" | "-c" => {
                 out.config = Some(PathBuf::from(args.next().context("--config needs a path")?))
             }
-            "--key" => {
-                out.key = Some(
-                    args.next()
-                        .context("--key needs a value")?
-                        .trim()
-                        .to_string(),
-                )
+            "--keyfile" => {
+                out.keyfile = Some(config::expand_tilde(
+                    &args.next().context("--keyfile needs a path")?,
+                ))
             }
+            // Keys on the command line are visible to every user via ps / /proc.
+            "--key" => anyhow::bail!("--key was removed (visible in ps); use --keyfile PATH"),
             "--help" | "-h" => {
                 println!(
-                    "usage: chatport [--config PATH] [--key KEY]\n  \
+                    "usage: chatport [--config PATH] [--keyfile PATH]\n  \
                      config default: ~/.config/chatport/config.toml\n  \
-                     --key / OPENROUTER_API_KEY override the default config key"
+                     --keyfile / OPENROUTER_API_KEY override the default config key"
                 );
                 std::process::exit(0);
             }
@@ -58,6 +57,17 @@ fn parse_args() -> Result<Args> {
         }
     }
     Ok(out)
+}
+
+/// The key from `path`, surrounding whitespace trimmed. Empty is an error.
+fn read_keyfile(path: &std::path::Path) -> Result<String> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading keyfile {}", path.display()))?;
+    let key = text.trim();
+    if key.is_empty() {
+        anyhow::bail!("keyfile {} is empty", path.display());
+    }
+    return Ok(key.to_string());
 }
 
 #[tokio::main]
@@ -70,10 +80,10 @@ async fn main() -> Result<()> {
 
     let args = parse_args()?;
     let mut cfg = config::load(args.config)?;
-    let override_key = args
-        .key
-        .filter(|k| !k.is_empty())
-        .or_else(|| std::env::var("OPENROUTER_API_KEY").ok());
+    let override_key = match &args.keyfile {
+        Some(p) => Some(read_keyfile(p)?),
+        None => std::env::var("OPENROUTER_API_KEY").ok(),
+    };
     cfg.resolve_keys(override_key)?;
     tracing::info!(
         "API keys: {:?} (default {:?})",
