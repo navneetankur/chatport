@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import * as api from './api';
-  import type { Message, Meta } from './api';
+  import type { Attachment, Message, Meta } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
   import Settings from './Settings.svelte';
@@ -79,13 +79,41 @@
     return { id: '', parent_id: parent, role: 'assistant', content: '', model, created_at: Date.now() };
   }
 
+  let attachments = $state<Attachment[]>([]);
+  let fileInput: HTMLInputElement | undefined = $state();
+
+  async function addFiles(files: FileList | null) {
+    for (const f of files ?? []) {
+      if (f.size > 2_000_000) {
+        error = `${f.name}: too large (max 2 MB)`;
+        continue;
+      }
+      attachments.push({ name: f.name, content: await f.text() });
+    }
+    if (fileInput) fileInput.value = '';
+  }
+
   async function send() {
     const text = input.trim();
-    if (!text || busy) return;
+    if ((!text && !attachments.length) || busy) return;
     if (!current) await newChat();
+    const atts = attachments;
     input = '';
-    const ok = await run((conv, on) => api.sendMessage(conv.id, leaf, text, on));
-    if (!ok && !messages.some((m) => m.content === text)) input = text;
+    attachments = [];
+    const ok = await run((conv, on) => api.sendMessage(conv.id, leaf, text, atts, on));
+    if (!ok && !messages.some((m) => m.content === text)) {
+      input = text;
+      attachments = atts;
+    }
+  }
+
+  async function stopGen() {
+    if (!current) return;
+    try {
+      await api.stop(current.id);
+    } catch (e) {
+      error = String(e);
+    }
   }
 
   // Inline edit of a user message: re-send as a sibling (same parent).
@@ -99,11 +127,11 @@
 
   async function submitEdit(m: Message) {
     const text = editText.trim();
-    if (!text || busy) return;
+    if ((!text && !m.attachments?.length) || busy) return;
     editing = null;
     // Hide the old branch while the new one streams.
     leaf = m.parent_id;
-    await run((conv, on) => api.sendMessage(conv.id, m.parent_id, text, on));
+    await run((conv, on) => api.sendMessage(conv.id, m.parent_id, text, m.attachments ?? [], on));
   }
 
   async function regen(m: Message) {
@@ -243,6 +271,7 @@
             {/each}
           {:else}
             <div class="text md">{@html renderMarkdown(m.content)}</div>
+            {#if m.partial && !m.error && m !== streaming}<div class="att">(stopped)</div>{/if}
             {#if m.error}<div class="err">⚠ {m.error}</div>{/if}
           {/if}
           {#if m !== streaming && editing !== m.id}
@@ -269,14 +298,34 @@
       {/each}
       {#if error}<div class="err">⚠ {error}</div>{/if}
     </div>
+    {#if attachments.length}
+      <div class="chips">
+        {#each attachments as a, i}
+          <span class="chip">📎 {a.name} <button title="Remove" onclick={() => attachments.splice(i, 1)}>×</button></span>
+        {/each}
+      </div>
+    {/if}
     <form onsubmit={(e) => { e.preventDefault(); send(); }}>
+      <input
+        type="file"
+        accept=".txt,.md,.markdown,text/plain,text/markdown"
+        multiple
+        hidden
+        bind:this={fileInput}
+        onchange={(e) => addFiles(e.currentTarget.files)}
+      />
+      <button type="button" title="Attach text/markdown files" onclick={() => fileInput?.click()}>📎</button>
       <textarea
         bind:value={input}
         onkeydown={onKey}
         rows="3"
         placeholder="Message (Enter to send, Shift+Enter for newline)"
       ></textarea>
-      <button type="submit" disabled={busy || !input.trim()}>Send</button>
+      {#if busy}
+        <button type="button" onclick={stopGen}>Stop</button>
+      {:else}
+        <button type="submit" disabled={!input.trim() && !attachments.length}>Send</button>
+      {/if}
     </form>
   </main>
 </div>
@@ -357,6 +406,9 @@
   .edit { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
   .err { color: #c44; margin-top: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 0; font-size: 0.85em; }
+  .chip { background: #8882; border-radius: 12px; padding: 2px 8px; }
+  .chip button { background: none; border: none; color: #888; cursor: pointer; }
   form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; }
   textarea { flex: 1; resize: vertical; font: inherit; padding: 8px; }
   @media (max-width: 640px) {

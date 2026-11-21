@@ -1,7 +1,7 @@
 # Tracker
 
 ## Status
-Milestones 1–5 done (4 and 5 not yet clicked through in a browser).
+Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 
 ## Milestones
 - [x] 1. Backend skeleton: config, OpenRouter streaming, JSONL storage, SSE API
@@ -9,7 +9,7 @@ Milestones 1–5 done (4 and 5 not yet clicked through in a browser).
 - [x] 3. Svelte UI: conversation list, chat view, streaming, markdown
 - [x] 4. Branch switcher `‹ 2/3 ›`, edit / regenerate buttons
 - [x] 5. Settings panel: model picker, system prompt, provider options, cache toggle, usage/cost display
-- [ ] 6. Attachments UI, stop button  ← **NEXT** (after the UI TODOs at the end of the backlog)
+- [x] 6. Attachments UI, stop button
 
 ## Next session — start here
 - Done: `web/` = Vite 8 + Svelte 5 + TS 6 (TS 7 breaks svelte-check; keep `~6`). Dev: `cd web && npm run dev` (proxies `/api` → 8787). `npm run check` = typecheck.
@@ -20,13 +20,15 @@ Milestones 1–5 done (4 and 5 not yet clicked through in a browser).
 - Branching UI: `siblings()` in tree.ts; all streaming goes through `run()` in App.svelte (send / edit / regenerate). Switch = `POST /leaf` with the sibling id → server returns its latest descendant.
 - SSE: endpoints are POST, so use `fetch` + stream reader (not `EventSource`). Events: `user_saved`, `delta {text}`, `usage`, `error {message}`, `done {full assistant msg}`.
 - Settings: `Settings.svelte` (⚙ in header). Raw provider JSON is the source of truth; form fields write through it. Model picker = `<input list>` + datalist from `/api/models`. Header shows branch totals (tokens/cost).
+- Stop: `AppState.running` = conv id -> (gen id, oneshot). Generation `select!`s on it; stopped reply saved `partial` with no error. Newer generation replaces the handle; finisher removes only its own.
+- Attachments: 📎 in composer reads .txt/.md client-side (2 MB cap), chips removable; edit re-sends the original attachments.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
 - [ ] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
 - [ ] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
-- [ ] Stop endpoint `POST /:id/stop` (needs per-conversation cancel handle; generation runs in a spawned task).
+- [x] Stop endpoint `POST /:id/stop`.
 - [ ] UI colors: message box and send button are yellow on dark bg — ugly, pick something that fits the dark theme.
 - [ ] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
 - [ ] Rename chat (UI + endpoint to update meta title).
@@ -53,3 +55,4 @@ Milestones 1–5 done (4 and 5 not yet clicked through in a browser).
 - 2026-11-21: Milestone 3 UI. svelte-check clean; live-tested send/stream via scratch config. Not yet clicked through in a real browser.
 - 2026-11-21: Milestone 4 (branch switcher, inline edit, regenerate). svelte-check clean, builds. Needs a manual browser click-through.
 - 2026-11-21: Milestone 5 (settings panel + branch usage totals). Frontend only; backend PATCH already existed. svelte-check clean; curl-tested /api/models + PATCH on scratch server. Router ids like `openrouter/free` aren't in /models, so the picker shows "Unknown model id" for them (harmless).
+- 2026-11-21: Milestone 6 (stop + attachments). Live-tested via curl: stop mid-stream → partial saved; attachment content reaches the model. Next: the 3 UI TODOs (colors, title from first msg, rename).

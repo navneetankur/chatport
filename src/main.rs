@@ -15,6 +15,8 @@ pub struct AppState {
     pub store: store::Store,
     pub provider: Arc<dyn provider::Provider>,
     pub config: config::Config,
+    /// In-flight generations: conv id -> (generation id, cancel sender).
+    pub running: api::Running,
 }
 
 struct Args {
@@ -75,6 +77,7 @@ async fn main() -> Result<()> {
         store,
         provider: Arc::new(provider::openrouter::OpenRouter::new(key)),
         config: cfg.clone(),
+        running: Default::default(),
     });
 
     let app = api::router(state).fallback(web::static_handler);

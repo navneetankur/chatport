@@ -11,11 +11,17 @@ use axum::{Json, Router};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 type St = State<Arc<AppState>>;
+
+/// Cancel handles for in-flight generations, keyed by conversation id.
+/// A newer generation in the same conversation replaces the older handle.
+pub type Running = Mutex<HashMap<String, (String, oneshot::Sender<()>)>>;
 
 pub struct ApiError(StatusCode, String);
 impl<E: Into<anyhow::Error>> From<E> for ApiError {
@@ -47,6 +53,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/conversations/{id}/messages", post(send))
         .route("/api/conversations/{id}/regenerate", post(regenerate))
         .route("/api/conversations/{id}/leaf", post(set_leaf))
+        .route("/api/conversations/{id}/stop", post(stop))
         .with_state(state)
 }
 
@@ -157,6 +164,17 @@ async fn delete_conv(State(s): St, Path(id): Path<String>) -> R<StatusCode> {
         true => Ok(StatusCode::NO_CONTENT),
         false => Err(not_found()),
     }
+}
+
+/// Abort the in-flight generation; the partial reply is saved as usual.
+async fn stop(State(s): St, Path(id): Path<String>) -> R<Json<Value>> {
+    let entry = s.running.lock().unwrap().remove(&id);
+    let stopped = match entry {
+        Some((_, tx)) => tx.send(()).is_ok(),
+        None => false,
+    };
+    tracing::info!("stop {id}: stopped={stopped}");
+    Ok(Json(json!({ "stopped": stopped })))
 }
 
 #[derive(Deserialize)]
@@ -292,32 +310,55 @@ fn generate(
         cache: meta.cache,
     };
     let conv_id = meta.id.clone();
+    let gen_id = new_id();
+    let (cancel_tx, mut cancel) = oneshot::channel::<()>();
+    s.running
+        .lock()
+        .unwrap()
+        .insert(conv_id.clone(), (gen_id.clone(), cancel_tx));
     tokio::spawn(async move {
         let mut asst = Message::assistant(user.id.clone(), meta.model.clone());
         let mut done = false;
-        match s.provider.stream_chat(req).await {
-            Err(e) => asst.error = Some(format!("{e:#}")),
-            Ok(mut stream) => {
-                while let Some(item) = stream.next().await {
-                    match item {
-                        Ok(ChatEvent::Delta(t)) => {
-                            asst.content.push_str(&t);
-                            let _ = tx.send(ev("delta", json!({ "text": t })));
-                        }
-                        Ok(ChatEvent::Usage(u)) => {
-                            let _ = tx.send(ev("usage", &u));
-                            asst.usage = Some(u);
-                        }
-                        Ok(ChatEvent::Done) => {
-                            done = true;
-                            break;
-                        }
-                        Err(e) => {
-                            asst.error = Some(format!("{e:#}"));
-                            break;
-                        }
+        let started = tokio::select! {
+            r = s.provider.stream_chat(req) => Some(r),
+            _ = &mut cancel => None,
+        };
+        match started {
+            None => tracing::info!("generation in {conv_id} stopped before first token"),
+            Some(Err(e)) => asst.error = Some(format!("{e:#}")),
+            Some(Ok(mut stream)) => loop {
+                let item = tokio::select! {
+                    i = stream.next() => i,
+                    _ = &mut cancel => {
+                        tracing::info!("generation in {conv_id} stopped");
+                        break;
+                    }
+                };
+                let Some(item) = item else { break };
+                match item {
+                    Ok(ChatEvent::Delta(t)) => {
+                        asst.content.push_str(&t);
+                        let _ = tx.send(ev("delta", json!({ "text": t })));
+                    }
+                    Ok(ChatEvent::Usage(u)) => {
+                        let _ = tx.send(ev("usage", &u));
+                        asst.usage = Some(u);
+                    }
+                    Ok(ChatEvent::Done) => {
+                        done = true;
+                        break;
+                    }
+                    Err(e) => {
+                        asst.error = Some(format!("{e:#}"));
+                        break;
                     }
                 }
+            },
+        }
+        {
+            let mut running = s.running.lock().unwrap();
+            if running.get(&conv_id).is_some_and(|(g, _)| *g == gen_id) {
+                running.remove(&conv_id);
             }
         }
         asst.partial = !done;

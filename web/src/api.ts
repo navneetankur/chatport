@@ -102,8 +102,12 @@ export const sendMessage = (
   id: string,
   parent_id: string | null,
   content: string,
+  attachments: Attachment[],
   on: (e: StreamEvent) => void,
-) => streamPost(`/api/conversations/${id}/messages`, { parent_id, content }, on);
+) => streamPost(`/api/conversations/${id}/messages`, { parent_id, content, attachments }, on);
+
+export const stop = (id: string) =>
+  fetch(`/api/conversations/${id}/stop`, { method: 'POST' }).then((r) => json<{ stopped: boolean }>(r));
 
 export const regenerate = (id: string, user_id: string, on: (e: StreamEvent) => void) =>
   streamPost(`/api/conversations/${id}/regenerate`, { user_id }, on);
