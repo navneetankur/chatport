@@ -177,10 +177,23 @@ pub struct BatchReply {
     pub tool_calls: Vec<String>,
 }
 
+/// Where a batch stands.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct BatchInfo {
+    /// validating, in_progress, finalizing, …
+    pub status: String,
+    /// Upstream provider running it (can change before it starts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Unix seconds after which the provider gives up; None = no hard deadline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
 #[derive(Debug)]
 pub enum BatchPoll {
-    /// Still running; carries the provider's status (validating, in_progress, …).
-    Pending(String),
+    /// Still running.
+    Pending(BatchInfo),
     Done(BatchReply),
     /// Unknown id. Also seen for a few seconds right after submit.
     NotFound,
@@ -191,7 +204,7 @@ pub trait Provider: Send + Sync {
     async fn list_models(&self) -> Result<Vec<ModelInfo>>;
     async fn stream_chat(&self, req: ChatRequest) -> Result<BoxStream<'static, Result<ChatEvent>>>;
     /// Submits `req` as a one-request batch. Returns the batch id.
-    async fn submit_batch(&self, req: &ChatRequest) -> Result<String>;
+    async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)>;
     async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll>;
     /// Removes the stored batch upstream. Fails while it is still running.
     async fn delete_batch(&self, key: &str, id: &str) -> Result<()>;

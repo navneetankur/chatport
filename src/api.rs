@@ -480,13 +480,14 @@ fn submit_batch(
                 tools: vec![],
                 session_id: meta.id.clone(),
             };
-            let id = s.provider.submit_batch(&req).await?;
+            let (id, info) = s.provider.submit_batch(&req).await?;
             let pending = PendingBatch {
                 id,
                 user_id: user.id.clone(),
                 model: meta.model.clone(),
                 key_name: meta.key_name.clone(),
                 submitted_at: now_ms(),
+                info,
             };
             // Re-read meta: settings may have been patched meanwhile.
             let mut m = s
@@ -559,7 +560,17 @@ async fn batch_refresh(State(s): St, Path(id): Path<String>) -> R<Json<Value>> {
         .map_err(|e| bad(&format!("{e:#}")))?
         .to_string();
     let reply = match s.provider.poll_batch(&key, &p.id).await? {
-        BatchPoll::Pending(status) => return Ok(Json(json!({ "status": status }))),
+        BatchPoll::Pending(info) => {
+            // Persist so a reload shows it; the provider can change before start.
+            if info != p.info {
+                let mut meta = load_meta(&s, &id)?;
+                if let Some(b) = meta.pending_batch.as_mut().filter(|b| b.id == p.id) {
+                    b.info = info.clone();
+                    s.store.put_meta(&meta)?;
+                }
+            }
+            return Ok(Json(json!(info)));
+        }
         BatchPoll::NotFound if now_ms().saturating_sub(p.submitted_at) < BATCH_VISIBLE_MS => {
             return Ok(Json(json!({ "status": "submitted" })));
         }

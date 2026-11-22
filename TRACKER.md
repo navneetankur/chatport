@@ -40,7 +40,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 ## Backlog / TODO
 - [x] Batch models (`<slug>:batch` from the normal picker): reply comes later via ⟳.
 - [ ] Batch: auto-poll the pending batch (e.g. every minute while the chat is open). Nice-to-have.
-- [ ] Batch UI: not yet clicked through in a browser (API live-tested via curl).
+- [ ] Batch UI (incl. provider + expiry in the pending row): not yet clicked through in a browser (API live-tested via curl).
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
 - [x] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
 - [x] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
@@ -123,3 +123,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: Sidebar: per-row actions folded behind a ⋯ toggle (chats + groups); desktop sidebar drag-resizable (160–600px, saved in localStorage, hidden on phones). Builds; not yet clicked through in a browser.
 - 2026-11-22: Send conversation id as OpenRouter `session_id`. Unit-tested; not live-tested.
 - 2026-11-22: Batch models. Unit tests for body field order + result parsing. Live (Haiku 5.5 :batch): submit OK, refresh → in_progress, second send → 409; after ~8 min ⟳ saved "batch ok" (provider Anthropic, 20/6 tokens) and the upstream delete succeeded. Per-request usage has no cost → filled from batch-level usage (unit-tested, not yet seen live).
+- 2026-11-22: Batch pending row shows provider + expiry (`PendingBatch` flattens `BatchInfo {status, provider, expires_at}` from submit, updated on each refresh). Live: Anthropic + expires_at at submit, status saved on refresh.

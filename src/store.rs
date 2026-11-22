@@ -9,7 +9,7 @@
 //! every operation, and moves happen under the write lock, so a move during
 //! a streaming reply is safe. A read racing a move may fail once.
 
-use crate::provider::{CachePolicy, ReasoningEffort, Role, ToolCall, Usage};
+use crate::provider::{BatchInfo, CachePolicy, ReasoningEffort, Role, ToolCall, Usage};
 use crate::tools::ToolResult;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -74,6 +74,9 @@ pub struct PendingBatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_name: Option<String>,
     pub submitted_at: u64,
+    /// Last known status, provider and deadline (from submit or the last refresh).
+    #[serde(default, flatten)]
+    pub info: BatchInfo,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

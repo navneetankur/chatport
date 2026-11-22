@@ -102,7 +102,6 @@
 
   async function open(id: string) {
     error = '';
-    batchStatus = '';
     const c = await api.getConversation(id);
     current = c.meta;
     viewGroup = null;
@@ -251,8 +250,6 @@
     }
   }
 
-  /** Last status seen for the pending batch ('' = not checked yet). */
-  let batchStatus = $state('');
   let batchBusy = $state(false);
 
   async function refreshBatch() {
@@ -267,12 +264,14 @@
         messages.push(r.message);
         leaf = r.message.id;
         current.pending_batch = null;
-        batchStatus = '';
         if (r.message.error) error = r.message.error;
         await scrollDown();
         refreshList();
-      } else {
-        batchStatus = r.status;
+      } else if (current.pending_batch) {
+        const pb = current.pending_batch;
+        pb.status = r.status;
+        if (r.provider) pb.provider = r.provider;
+        if (r.expires_at) pb.expires_at = r.expires_at;
       }
     } catch (e) {
       error = String(e);
@@ -290,7 +289,6 @@
     try {
       await api.forgetBatch(current.id);
       current.pending_batch = null;
-      batchStatus = '';
     } catch (e) {
       error = String(e);
     }
@@ -387,7 +385,6 @@
           case 'batch':
             streaming = null;
             if (current) current.pending_batch = e.data;
-            batchStatus = 'submitted';
             break;
           case 'done':
             streaming = null;
@@ -708,8 +705,10 @@
           <div class="batch">
             <button class="icon round" title="Check for the reply" onclick={refreshBatch} disabled={batchBusy}>⟳</button>
             <span>
-              Batch {batchBusy ? 'checking…' : batchStatus || 'pending'} · {pb.model.split('/').pop()} · sent
-              {new Date(pb.submitted_at).toLocaleString()}
+              Batch {batchBusy ? 'checking…' : pb.status || 'pending'} · {pb.model.split('/').pop()}
+              {#if pb.provider}via {pb.provider}{/if}
+              · sent {new Date(pb.submitted_at).toLocaleString()}
+              {#if pb.expires_at}· expires {new Date(pb.expires_at * 1000).toLocaleString()}{/if}
             </span>
             <button class="icon" title="Forget this batch" onclick={forgetBatch} disabled={batchBusy}>✕</button>
           </div>

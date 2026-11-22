@@ -79,6 +79,11 @@ export interface PendingBatch {
   model: string;
   key_name?: string;
   submitted_at: number;
+  /** Last known: validating, in_progress, finalizing, … */
+  status?: string;
+  provider?: string;
+  /** Unix seconds; the provider gives up after this. */
+  expires_at?: number;
 }
 
 /** Batch models (`<slug>:batch`) reply asynchronously; ⟳ fetches the reply. */
@@ -187,7 +192,7 @@ export const stop = (id: string) =>
 /** Checks the pending batch once; `message` is set when the reply arrived. */
 export const refreshBatch = (id: string) =>
   fetch(`api/conversations/${id}/batch/refresh`, { method: 'POST' }).then((r) =>
-    json<{ status: string; message?: Message }>(r),
+    json<{ status: string; provider?: string; expires_at?: number; message?: Message }>(r),
   );
 
 /** Forgets the pending batch (it keeps running upstream if not finished). */

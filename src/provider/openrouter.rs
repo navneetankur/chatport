@@ -196,6 +196,17 @@ fn merge_batch_cost(req: Option<Usage>, batch: Option<Usage>) -> Option<Usage> {
     return Some(u);
 }
 
+fn batch_info(v: &Value, status: &str) -> BatchInfo {
+    return BatchInfo {
+        status: status.to_string(),
+        provider: v["provider"]
+            .as_str()
+            .filter(|p| !p.is_empty())
+            .map(str::to_string),
+        expires_at: v["expires_at"].as_u64(),
+    };
+}
+
 /// Interprets `GET /batches/{id}`.
 pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
     let status = v["status"].as_str().unwrap_or("unknown");
@@ -215,12 +226,14 @@ pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
                 ..Default::default()
             }));
         }
-        s => return Ok(BatchPoll::Pending(s.to_string())),
+        s => return Ok(BatchPoll::Pending(batch_info(v, s))),
     }
     let Some(result) = v["results"].as_array().and_then(|r| r.first()) else {
         // Completed, but results not attached yet (docs: can lag briefly).
-        return Ok(BatchPoll::Pending("finalizing".into()));
+        return Ok(BatchPoll::Pending(batch_info(v, "finalizing")));
     };
+    // Cost lives at batch level (docs); logged until verified live.
+    log::info!("batch {} usage: {}", v["id"], v["usage"]);
     let batch_usage = v.get("usage").filter(|u| !u.is_null()).map(usage_from);
     if !result["error"].is_null() {
         return Ok(BatchPoll::Done(BatchReply {
@@ -430,7 +443,7 @@ impl Provider for OpenRouter {
         Ok(UnboundedReceiverStream::new(rx).boxed())
     }
 
-    async fn submit_batch(&self, req: &ChatRequest) -> Result<String> {
+    async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)> {
         let resp = self
             .http
             .post(format!("{BASE}/batches"))
@@ -445,8 +458,9 @@ impl Provider for OpenRouter {
         let id = v["id"]
             .as_str()
             .ok_or_else(|| anyhow!("batch submit: no id in response"))?;
-        log::info!("batch {id} submitted ({})", v["status"]);
-        return Ok(id.to_string());
+        let info = batch_info(&v, v["status"].as_str().unwrap_or("validating"));
+        log::info!("batch {id} submitted: {info:?}");
+        return Ok((id.to_string(), info));
     }
 
     async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll> {
@@ -690,9 +704,15 @@ mod tests {
     #[test]
     fn parse_batch_states() {
         let p = parse_batch(&json!({ "status": "in_progress", "results": null })).unwrap();
-        assert!(matches!(p, BatchPoll::Pending(s) if s == "in_progress"));
+        assert!(matches!(p, BatchPoll::Pending(i) if i.status == "in_progress"));
+        let p = parse_batch(
+            &json!({ "status": "validating", "provider": "Google AI Studio", "expires_at": 9 }),
+        )
+        .unwrap();
+        assert!(matches!(p, BatchPoll::Pending(i)
+            if i.provider.as_deref() == Some("Google AI Studio") && i.expires_at == Some(9)));
         let p = parse_batch(&json!({ "status": "completed", "results": null })).unwrap();
-        assert!(matches!(p, BatchPoll::Pending(s) if s == "finalizing"));
+        assert!(matches!(p, BatchPoll::Pending(i) if i.status == "finalizing"));
         let p =
             parse_batch(&json!({ "status": "expired", "error": { "message": "late" } })).unwrap();
         assert!(
