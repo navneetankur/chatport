@@ -133,6 +133,126 @@ pub fn build_body(req: &ChatRequest) -> Value {
     body
 }
 
+/// Batch keeps only these `provider` keys; any other routing preference is a 400.
+const BATCH_PROVIDER_KEYS: [&str; 2] = ["only", "allow_fallbacks"];
+
+/// `POST /batches` body with one request. The top-level fields must precede
+/// `requests` (OpenRouter streams the body); serde_json sorts keys, and
+/// endpoint < model < provider < requests, which a test pins down.
+pub fn build_batch_body(req: &ChatRequest) -> Value {
+    let mut body = build_body(req);
+    let obj = body.as_object_mut().expect("body is an object");
+    obj.remove("stream");
+    obj.remove("model");
+    let provider = obj.remove("provider").and_then(|p| {
+        let p = p.as_object()?;
+        let dropped: Vec<&String> = p
+            .keys()
+            .filter(|k| !BATCH_PROVIDER_KEYS.contains(&k.as_str()))
+            .collect();
+        if !dropped.is_empty() {
+            log::info!("batch: dropping provider options {dropped:?} (not supported)");
+        }
+        let kept: serde_json::Map<String, Value> = p
+            .iter()
+            .filter(|(k, _)| BATCH_PROVIDER_KEYS.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        (!kept.is_empty()).then_some(Value::Object(kept))
+    });
+    let mut batch = json!({
+        "endpoint": "/v1/chat/completions",
+        "model": req.model,
+        "requests": [{ "custom_id": "r1", "body": body }],
+    });
+    if let Some(p) = provider {
+        batch["provider"] = p;
+    }
+    return batch;
+}
+
+fn usage_from(u: &Value) -> Usage {
+    let n = |p: &str| u.pointer(p).and_then(Value::as_u64).unwrap_or(0);
+    return Usage {
+        prompt_tokens: n("/prompt_tokens"),
+        completion_tokens: n("/completion_tokens"),
+        cached_tokens: n("/prompt_tokens_details/cached_tokens"),
+        reasoning_tokens: n("/completion_tokens_details/reasoning_tokens"),
+        cost: u.get("cost").and_then(Value::as_f64),
+        upstream_cost: u
+            .pointer("/cost_details/upstream_inference_cost")
+            .and_then(Value::as_f64),
+    };
+}
+
+/// Interprets `GET /batches/{id}`.
+pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
+    let status = v["status"].as_str().unwrap_or("unknown");
+    let msg = |v: &Value| {
+        v.pointer("/error/message")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    match status {
+        "completed" => {}
+        "failed" | "expired" | "cancelled" => {
+            return Ok(BatchPoll::Done(BatchReply {
+                error: Some(format!(
+                    "batch {status}: {}",
+                    msg(v).unwrap_or_else(|| "no details".into())
+                )),
+                ..Default::default()
+            }));
+        }
+        s => return Ok(BatchPoll::Pending(s.to_string())),
+    }
+    let Some(result) = v["results"].as_array().and_then(|r| r.first()) else {
+        // Completed, but results not attached yet (docs: can lag briefly).
+        return Ok(BatchPoll::Pending("finalizing".into()));
+    };
+    let batch_usage = v.get("usage").filter(|u| !u.is_null()).map(usage_from);
+    if !result["error"].is_null() {
+        return Ok(BatchPoll::Done(BatchReply {
+            error: Some(msg(result).unwrap_or_else(|| result["error"].to_string())),
+            usage: batch_usage,
+            ..Default::default()
+        }));
+    }
+    let body = &result["response"]["body"];
+    let s = |p: &str| body.pointer(p).and_then(Value::as_str).map(str::to_string);
+    let tool_calls = body
+        .pointer("/choices/0/message/tool_calls")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.pointer("/function/name")?.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    return Ok(BatchPoll::Done(BatchReply {
+        content: s("/choices/0/message/content").unwrap_or_default(),
+        reasoning: s("/choices/0/message/reasoning").unwrap_or_default(),
+        model: s("/model").filter(|m| !m.is_empty()),
+        provider: s("/provider")
+            .or_else(|| v["provider"].as_str().map(str::to_string))
+            .filter(|p| !p.is_empty()),
+        usage: body
+            .get("usage")
+            .filter(|u| !u.is_null())
+            .map(usage_from)
+            .or(batch_usage),
+        error: None,
+        tool_calls,
+    }));
+}
+
+/// Error body of a failed OpenRouter call as an `anyhow` error.
+async fn fail(resp: reqwest::Response) -> anyhow::Error {
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    return anyhow!("OpenRouter {status}: {text}");
+}
+
 /// Parse one SSE `data:` payload. Returns events to emit.
 fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     if data == "[DONE]" {
@@ -190,17 +310,7 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
         }
     }
     if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
-        let n = |p: &str| u.pointer(p).and_then(Value::as_u64).unwrap_or(0);
-        out.push(ChatEvent::Usage(Usage {
-            prompt_tokens: n("/prompt_tokens"),
-            completion_tokens: n("/completion_tokens"),
-            cached_tokens: n("/prompt_tokens_details/cached_tokens"),
-            reasoning_tokens: n("/completion_tokens_details/reasoning_tokens"),
-            cost: u.get("cost").and_then(Value::as_f64),
-            upstream_cost: u
-                .pointer("/cost_details/upstream_inference_cost")
-                .and_then(Value::as_f64),
-        }));
+        out.push(ChatEvent::Usage(usage_from(u)));
     }
     Ok(out)
 }
@@ -308,6 +418,56 @@ impl Provider for OpenRouter {
             let _ = tx.send(Ok(ChatEvent::Done));
         });
         Ok(UnboundedReceiverStream::new(rx).boxed())
+    }
+
+    async fn submit_batch(&self, req: &ChatRequest) -> Result<String> {
+        let resp = self
+            .http
+            .post(format!("{BASE}/batches"))
+            .bearer_auth(&req.key)
+            .json(&build_batch_body(req))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        let v: Value = resp.json().await?;
+        let id = v["id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("batch submit: no id in response"))?;
+        log::info!("batch {id} submitted ({})", v["status"]);
+        return Ok(id.to_string());
+    }
+
+    async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll> {
+        let resp = self
+            .http
+            .get(format!("{BASE}/batches/{id}"))
+            .bearer_auth(key)
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(BatchPoll::NotFound);
+        }
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        let v: Value = resp.json().await?;
+        return parse_batch(&v);
+    }
+
+    async fn delete_batch(&self, key: &str, id: &str) -> Result<()> {
+        let resp = self
+            .http
+            .delete(format!("{BASE}/batches/{id}"))
+            .bearer_auth(key)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        log::info!("batch {id} deleted upstream");
+        return Ok(());
     }
 }
 
@@ -494,5 +654,62 @@ mod tests {
             matches!(&ev[..], [ChatEvent::ToolCall { index: 1, id: None, name: None, arguments }]
             if arguments == "{\"pa")
         );
+    }
+
+    #[test]
+    fn batch_body_fields_before_requests() {
+        let mut r = req("anthropic/claude-x:batch", CachePolicy::Auto);
+        r.options = Some(json!({ "only": ["anthropic"], "data_collection": "deny" }));
+        let b = build_batch_body(&r);
+        let s = serde_json::to_string(&b).unwrap();
+        let at = |k: &str| s.find(&format!("\"{k}\"")).unwrap();
+        assert!(at("endpoint") < at("requests"));
+        assert!(at("model") < at("requests"));
+        assert!(at("provider") < at("requests"));
+        assert_eq!(b["provider"], json!({ "only": ["anthropic"] }));
+        let body = &b["requests"][0]["body"];
+        assert!(body.get("stream").is_none() && body.get("provider").is_none());
+        assert!(body.get("model").is_none());
+        assert_eq!(body["session_id"], "conv1");
+        assert!(body["messages"][0]["content"][0]["cache_control"].is_object());
+        // Only unsupported keys → no provider at all.
+        r.options = Some(json!({ "data_collection": "deny" }));
+        assert!(build_batch_body(&r).get("provider").is_none());
+    }
+
+    #[test]
+    fn parse_batch_states() {
+        let p = parse_batch(&json!({ "status": "in_progress", "results": null })).unwrap();
+        assert!(matches!(p, BatchPoll::Pending(s) if s == "in_progress"));
+        let p = parse_batch(&json!({ "status": "completed", "results": null })).unwrap();
+        assert!(matches!(p, BatchPoll::Pending(s) if s == "finalizing"));
+        let p =
+            parse_batch(&json!({ "status": "expired", "error": { "message": "late" } })).unwrap();
+        assert!(
+            matches!(p, BatchPoll::Done(r) if r.error.as_deref() == Some("batch expired: late"))
+        );
+        let p = parse_batch(&json!({ "status": "completed", "results": [
+            { "custom_id": "r1", "response": null, "error": { "message": "too long" } }
+        ]}))
+        .unwrap();
+        assert!(matches!(p, BatchPoll::Done(r) if r.error.as_deref() == Some("too long")));
+        let p = parse_batch(
+            &json!({ "status": "completed", "provider": "Anthropic", "results": [
+                { "custom_id": "r1", "error": null, "response": { "status_code": 200, "body": {
+                    "model": "anthropic/claude-x",
+                    "choices": [{ "message": { "content": "hi", "reasoning": "hm",
+                        "tool_calls": [{ "function": { "name": "read_file" } }] } }],
+                    "usage": { "prompt_tokens": 5, "completion_tokens": 2, "cost": 0.01 }
+                }}}
+            ]}),
+        )
+        .unwrap();
+        let BatchPoll::Done(r) = p else { panic!() };
+        assert_eq!((r.content.as_str(), r.reasoning.as_str()), ("hi", "hm"));
+        assert_eq!(r.model.as_deref(), Some("anthropic/claude-x"));
+        assert_eq!(r.provider.as_deref(), Some("Anthropic"));
+        assert_eq!(r.usage.unwrap().cost, Some(0.01));
+        assert_eq!(r.tool_calls, ["read_file"]);
+        assert!(r.error.is_none());
     }
 }

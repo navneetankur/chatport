@@ -69,7 +69,20 @@ export interface Meta {
   file_root?: string | null;
   tools?: boolean;
   leaf?: string | null;
+  /** Batch reply being waited for; sends are blocked until it is fetched or forgotten. */
+  pending_batch?: PendingBatch | null;
 }
+
+export interface PendingBatch {
+  id: string;
+  user_id: string;
+  model: string;
+  key_name?: string;
+  submitted_at: number;
+}
+
+/** Batch models (`<slug>:batch`) reply asynchronously; ⟳ fetches the reply. */
+export const isBatchModel = (model: string) => model.endsWith(':batch');
 
 export interface Conversation {
   meta: Meta;
@@ -127,6 +140,7 @@ export type StreamEvent =
   | { event: 'usage'; data: Usage }
   | { event: 'tool_round'; data: ToolRound }
   | { event: 'error'; data: { message: string } }
+  | { event: 'batch'; data: PendingBatch }
   | { event: 'done'; data: Message };
 
 /** POST that answers with SSE; calls `on` for each event until the stream ends. */
@@ -169,6 +183,18 @@ export const sendMessage = (
 
 export const stop = (id: string) =>
   fetch(`api/conversations/${id}/stop`, { method: 'POST' }).then((r) => json<{ stopped: boolean }>(r));
+
+/** Checks the pending batch once; `message` is set when the reply arrived. */
+export const refreshBatch = (id: string) =>
+  fetch(`api/conversations/${id}/batch/refresh`, { method: 'POST' }).then((r) =>
+    json<{ status: string; message?: Message }>(r),
+  );
+
+/** Forgets the pending batch (it keeps running upstream if not finished). */
+export const forgetBatch = (id: string) =>
+  fetch(`api/conversations/${id}/batch/forget`, { method: 'POST' }).then((r) =>
+    json<{ upstream_deleted: boolean }>(r),
+  );
 
 export const regenerate = (id: string, user_id: string, on: (e: StreamEvent) => void) =>
   streamPost(`api/conversations/${id}/regenerate`, { user_id }, on);

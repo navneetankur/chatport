@@ -31,6 +31,7 @@ fn meta(title: &str) -> Meta {
         file_root: None,
         tools: false,
         leaf: None,
+        pending_batch: None,
     }
 }
 

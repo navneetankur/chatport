@@ -158,8 +158,41 @@ pub struct ModelInfo {
     pub pricing: Value,
 }
 
+/// Batch models are listed with this suffix (OpenRouter `<slug>:batch`).
+pub fn is_batch_model(model: &str) -> bool {
+    model.ends_with(":batch")
+}
+
+/// The finished reply of a one-request batch.
+#[derive(Debug, Default)]
+pub struct BatchReply {
+    pub content: String,
+    pub reasoning: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub usage: Option<Usage>,
+    /// Request-level failure (the batch itself completed).
+    pub error: Option<String>,
+    /// The model asked for tools; batch runs one round only, so they were not run.
+    pub tool_calls: Vec<String>,
+}
+
+#[derive(Debug)]
+pub enum BatchPoll {
+    /// Still running; carries the provider's status (validating, in_progress, …).
+    Pending(String),
+    Done(BatchReply),
+    /// Unknown id. Also seen for a few seconds right after submit.
+    NotFound,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     async fn list_models(&self) -> Result<Vec<ModelInfo>>;
     async fn stream_chat(&self, req: ChatRequest) -> Result<BoxStream<'static, Result<ChatEvent>>>;
+    /// Submits `req` as a one-request batch. Returns the batch id.
+    async fn submit_batch(&self, req: &ChatRequest) -> Result<String>;
+    async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll>;
+    /// Removes the stored batch upstream. Fails while it is still running.
+    async fn delete_batch(&self, key: &str, id: &str) -> Result<()>;
 }

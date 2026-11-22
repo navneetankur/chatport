@@ -1,9 +1,10 @@
 use crate::AppState;
 use crate::files;
 use crate::provider::{
-    CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role, ToolCall, Usage,
+    BatchPoll, BatchReply, CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role,
+    ToolCall, Usage, is_batch_model,
 };
-use crate::store::{self, Attachment, Message, Meta, ToolRound, new_id, now_ms};
+use crate::store::{self, Attachment, Message, Meta, PendingBatch, ToolRound, new_id, now_ms};
 use crate::tools;
 use crate::tree;
 use axum::extract::{Path, Query, State};
@@ -41,6 +42,12 @@ impl IntoResponse for ApiError {
 fn bad(msg: &str) -> ApiError {
     ApiError(StatusCode::BAD_REQUEST, msg.into())
 }
+fn conflict(msg: &str) -> ApiError {
+    ApiError(StatusCode::CONFLICT, msg.into())
+}
+fn not_found_msg(msg: &str) -> ApiError {
+    ApiError(StatusCode::NOT_FOUND, msg.into())
+}
 fn not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "not found".into())
 }
@@ -65,6 +72,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/conversations/{id}/regenerate", post(regenerate))
         .route("/api/conversations/{id}/leaf", post(set_leaf))
         .route("/api/conversations/{id}/stop", post(stop))
+        .route("/api/conversations/{id}/batch/refresh", post(batch_refresh))
+        .route("/api/conversations/{id}/batch/forget", post(batch_forget))
         .with_state(state)
 }
 
@@ -188,6 +197,7 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         file_root: s.config.default_file_root.clone(),
         tools: false,
         leaf: None,
+        pending_batch: None,
     };
     s.store.put_meta(&meta)?;
     Ok(Json(meta))
@@ -378,12 +388,9 @@ struct SendReq {
 }
 
 /// New user message (also used for edits: same parent as the edited one). Streams reply.
-async fn send(
-    State(s): St,
-    Path(id): Path<String>,
-    Json(r): Json<SendReq>,
-) -> R<impl IntoResponse> {
+async fn send(State(s): St, Path(id): Path<String>, Json(r): Json<SendReq>) -> R<Response> {
     let mut meta = load_meta(&s, &id)?;
+    no_pending_batch(&meta)?;
     let mut msgs = s.store.messages(&id)?;
     if let Some(p) = &r.parent_id {
         match msgs.iter().find(|m| &m.id == p) {
@@ -406,7 +413,10 @@ async fn send(
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
     msgs.push(user.clone());
-    Ok(generate(s, meta, msgs, user, true))
+    if is_batch_model(&meta.model) {
+        return Ok(submit_batch(s, meta, msgs, user, true).into_response());
+    }
+    Ok(generate(s, meta, msgs, user, true).into_response())
 }
 
 #[derive(Deserialize)]
@@ -415,19 +425,189 @@ struct RegenReq {
     user_id: String,
 }
 
-async fn regenerate(
-    State(s): St,
-    Path(id): Path<String>,
-    Json(r): Json<RegenReq>,
-) -> R<impl IntoResponse> {
+async fn regenerate(State(s): St, Path(id): Path<String>, Json(r): Json<RegenReq>) -> R<Response> {
     let meta = load_meta(&s, &id)?;
+    no_pending_batch(&meta)?;
     let msgs = s.store.messages(&id)?;
     let user = match msgs.iter().find(|m| m.id == r.user_id) {
         Some(m) if m.role == Role::User => m.clone(),
         Some(_) => return Err(bad("user_id must be a user message")),
         None => return Err(bad("unknown user_id")),
     };
-    Ok(generate(s, meta, msgs, user, false))
+    if is_batch_model(&meta.model) {
+        return Ok(submit_batch(s, meta, msgs, user, false).into_response());
+    }
+    Ok(generate(s, meta, msgs, user, false).into_response())
+}
+
+/// One batch at a time per conversation: its reply has a fixed parent.
+fn no_pending_batch(meta: &Meta) -> R<()> {
+    match &meta.pending_batch {
+        Some(b) => Err(conflict(&format!(
+            "batch {} is still pending; refresh or forget it first",
+            b.id
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Submits the reply as a one-request batch. SSE: optional `user_saved`, then
+/// `batch {pending}` on success, or `error` + `done {assistant msg}` on failure.
+/// Tools are not offered: a batch is a single round.
+fn submit_batch(
+    s: Arc<AppState>,
+    meta: Meta,
+    msgs: Vec<Message>,
+    user: Message,
+    announce_user: bool,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Event>();
+    if announce_user {
+        let _ = tx.send(ev("user_saved", &user));
+    }
+    tokio::spawn(async move {
+        let conv_id = meta.id.clone();
+        let submitted = async {
+            let key = s.config.key_for(meta.key_name.as_deref())?.to_string();
+            let req = ChatRequest {
+                key,
+                model: meta.model.clone(),
+                system: meta.system.clone(),
+                messages: context(&tree::path(&msgs, &user.id), false),
+                options: meta.provider.clone(),
+                cache: meta.cache,
+                reasoning_effort: meta.reasoning_effort,
+                tools: vec![],
+                session_id: meta.id.clone(),
+            };
+            let id = s.provider.submit_batch(&req).await?;
+            let pending = PendingBatch {
+                id,
+                user_id: user.id.clone(),
+                model: meta.model.clone(),
+                key_name: meta.key_name.clone(),
+                submitted_at: now_ms(),
+            };
+            // Re-read meta: settings may have been patched meanwhile.
+            let mut m = s
+                .store
+                .meta(&conv_id)?
+                .ok_or_else(|| anyhow::anyhow!("conversation vanished"))?;
+            m.pending_batch = Some(pending.clone());
+            m.updated_at = now_ms();
+            s.store.put_meta(&m)?;
+            anyhow::Ok(pending)
+        };
+        match submitted.await {
+            Ok(p) => {
+                log::info!("{conv_id}: waiting on batch {}", p.id);
+                let _ = tx.send(ev("batch", &p));
+            }
+            Err(e) => {
+                let mut asst = Message::assistant(user.id.clone(), meta.model.clone());
+                asst.error = Some(format!("batch submit failed: {e:#}"));
+                asst.partial = true;
+                if let Err(e) = save_reply(&s, &conv_id, &asst) {
+                    log::error!("saving reply in {conv_id}: {e:#}");
+                }
+                let _ = tx.send(ev("error", json!({ "message": asst.error })));
+                let _ = tx.send(ev("done", &asst));
+            }
+        }
+    });
+    Sse::new(UnboundedReceiverStream::new(rx).map(Ok)).keep_alive(KeepAlive::default())
+}
+
+fn pending_of(meta: &Meta) -> R<PendingBatch> {
+    meta.pending_batch
+        .clone()
+        .ok_or_else(|| bad("no pending batch"))
+}
+
+/// The assistant message for a finished batch.
+fn batch_message(p: &PendingBatch, r: BatchReply) -> Message {
+    let mut asst = Message::assistant(p.user_id.clone(), p.model.clone());
+    if let Some(m) = r.model {
+        record_model(&mut asst, &p.model, m);
+    }
+    asst.provider_name = r.provider;
+    asst.usage = r.usage;
+    asst.content = r.content;
+    asst.reasoning = r.reasoning;
+    asst.partial = r.error.is_some();
+    asst.error = r.error;
+    if !r.tool_calls.is_empty() {
+        asst.warning = Some(format!(
+            "model tried to call {}, but tools are not run in batch mode",
+            r.tool_calls.join(", ")
+        ));
+    }
+    return asst;
+}
+
+/// A fresh batch can 404 for a few seconds after submit.
+const BATCH_VISIBLE_MS: u64 = 120_000;
+
+/// Checks the pending batch once. Done → reply appended, pending cleared,
+/// batch deleted upstream (best effort). Body: `{status, message?}`.
+async fn batch_refresh(State(s): St, Path(id): Path<String>) -> R<Json<Value>> {
+    let meta = load_meta(&s, &id)?;
+    let p = pending_of(&meta)?;
+    let key = s
+        .config
+        .key_for(p.key_name.as_deref())
+        .map_err(|e| bad(&format!("{e:#}")))?
+        .to_string();
+    let reply = match s.provider.poll_batch(&key, &p.id).await? {
+        BatchPoll::Pending(status) => return Ok(Json(json!({ "status": status }))),
+        BatchPoll::NotFound if now_ms().saturating_sub(p.submitted_at) < BATCH_VISIBLE_MS => {
+            return Ok(Json(json!({ "status": "submitted" })));
+        }
+        BatchPoll::NotFound => {
+            return Err(not_found_msg(&format!(
+                "batch {} not found upstream (deleted or older than 30 days); forget it",
+                p.id
+            )));
+        }
+        BatchPoll::Done(r) => r,
+    };
+    // A concurrent refresh may have saved it already.
+    let mut meta = load_meta(&s, &id)?;
+    if meta.pending_batch.as_ref().map(|b| &b.id) != Some(&p.id) {
+        return Err(conflict("batch was already handled"));
+    }
+    let asst = batch_message(&p, reply);
+    s.store.append(&id, &asst)?;
+    meta.pending_batch = None;
+    meta.leaf = Some(asst.id.clone());
+    meta.updated_at = now_ms();
+    s.store.put_meta(&meta)?;
+    log::info!("{id}: batch {} done, reply {}", p.id, asst.id);
+    let s2 = s.clone();
+    tokio::spawn(async move {
+        if let Err(e) = s2.provider.delete_batch(&key, &p.id).await {
+            log::warn!("deleting batch {}: {e:#}", p.id);
+        }
+    });
+    Ok(Json(json!({ "status": "done", "message": asst })))
+}
+
+/// Drops the pending batch locally. OpenRouter has no cancel: a batch still
+/// running keeps running and is billed; only a finished one can be deleted.
+async fn batch_forget(State(s): St, Path(id): Path<String>) -> R<Json<Value>> {
+    let mut meta = load_meta(&s, &id)?;
+    let p = pending_of(&meta)?;
+    meta.pending_batch = None;
+    meta.updated_at = now_ms();
+    s.store.put_meta(&meta)?;
+    let deleted = match s.config.key_for(p.key_name.as_deref()) {
+        Ok(key) => s.provider.delete_batch(key, &p.id).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = &deleted {
+        log::warn!("{id}: forgot batch {} without deleting it: {e:#}", p.id);
+    }
+    Ok(Json(json!({ "upstream_deleted": deleted.is_ok() })))
 }
 
 fn ev(name: &str, data: impl Serialize) -> Event {

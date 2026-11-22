@@ -102,6 +102,7 @@
 
   async function open(id: string) {
     error = '';
+    batchStatus = '';
     const c = await api.getConversation(id);
     current = c.meta;
     viewGroup = null;
@@ -234,6 +235,10 @@
 
   async function send(text: string, atts: Attachment[]) {
     if (busy) return;
+    if (current?.pending_batch) {
+      error = 'A batch reply is pending: ⟳ to fetch it, ✕ to forget it.';
+      return;
+    }
     if (!current) await newChat();
     const prevText = input;
     const prevAtts = attachments;
@@ -243,6 +248,51 @@
     if (!ok && !messages.some((m) => m.content === text)) {
       input = prevText;
       attachments = prevAtts;
+    }
+  }
+
+  /** Last status seen for the pending batch ('' = not checked yet). */
+  let batchStatus = $state('');
+  let batchBusy = $state(false);
+
+  async function refreshBatch() {
+    if (!current?.pending_batch || batchBusy) return;
+    const conv = current;
+    batchBusy = true;
+    error = '';
+    try {
+      const r = await api.refreshBatch(conv.id);
+      if (current?.id !== conv.id) return;
+      if (r.message) {
+        messages.push(r.message);
+        leaf = r.message.id;
+        current.pending_batch = null;
+        batchStatus = '';
+        if (r.message.error) error = r.message.error;
+        await scrollDown();
+        refreshList();
+      } else {
+        batchStatus = r.status;
+      }
+    } catch (e) {
+      error = String(e);
+    } finally {
+      batchBusy = false;
+    }
+  }
+
+  async function forgetBatch() {
+    if (!current?.pending_batch) return;
+    const ok = confirm(
+      'Forget this batch? OpenRouter cannot cancel a running batch: it keeps running and is billed, its reply is just not saved.',
+    );
+    if (!ok) return;
+    try {
+      await api.forgetBatch(current.id);
+      current.pending_batch = null;
+      batchStatus = '';
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -333,6 +383,11 @@
             break;
           case 'error':
             error = e.data.message;
+            break;
+          case 'batch':
+            streaming = null;
+            if (current) current.pending_batch = e.data;
+            batchStatus = 'submitted';
             break;
           case 'done':
             streaming = null;
@@ -624,9 +679,9 @@
                 class:on={openRaw[m.id]}
                 onclick={() => (openRaw[m.id] = !openRaw[m.id])}>&lt;/&gt;</button>
               {#if m.role === 'user'}
-                <button class="icon" title="Edit" onclick={() => startEdit(m)} disabled={busy}>✎</button>
+                <button class="icon" title="Edit" onclick={() => startEdit(m)} disabled={busy || !!current?.pending_batch}>✎</button>
               {:else}
-                <button class="icon" title="Regenerate" onclick={() => regen(m)} disabled={busy}>↻</button>
+                <button class="icon" title="Regenerate" onclick={() => regen(m)} disabled={busy || !!current?.pending_batch}>↻</button>
                 <span>{shortLine(m)}</span>
                 <button
                   class="icon"
@@ -647,6 +702,19 @@
           {/if}
         </div>
       {/each}
+      {#if current?.pending_batch}
+        {@const pb = current.pending_batch}
+        <div class="msg assistant">
+          <div class="batch">
+            <button class="icon round" title="Check for the reply" onclick={refreshBatch} disabled={batchBusy}>⟳</button>
+            <span>
+              Batch {batchBusy ? 'checking…' : batchStatus || 'pending'} · {pb.model.split('/').pop()} · sent
+              {new Date(pb.submitted_at).toLocaleString()}
+            </span>
+            <button class="icon" title="Forget this batch" onclick={forgetBatch} disabled={batchBusy}>✕</button>
+          </div>
+        </div>
+      {/if}
       {#if error}<div class="err">⚠ {error}</div>{/if}
     </div>
     <MessageInput
@@ -661,7 +729,7 @@
         {#if busy}
           <button type="button" onclick={stopGen}>Stop</button>
         {:else}
-          <button type="submit" disabled={!can}>Send</button>
+          <button type="submit" disabled={!can || !!current?.pending_batch}>Send</button>
         {/if}
       {/snippet}
     </MessageInput>
@@ -807,6 +875,11 @@
   .meta button:disabled { opacity: 0.4; cursor: default; }
   .meta .icon { font-size: 1.15em; line-height: 1; }
   .meta .icon.on { color: var(--accent); }
+  .batch { display: flex; gap: 8px; align-items: center; font-size: 0.9em; color: #888; }
+  .batch .round {
+    width: 2em; height: 2em; border-radius: 50%; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 1.1em;
+  }
   .details {
     display: grid;
     grid-template-columns: max-content 1fr;

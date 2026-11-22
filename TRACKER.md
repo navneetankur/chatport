@@ -38,6 +38,9 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
 ## Backlog / TODO
+- [x] Batch models (`<slug>:batch` from the normal picker): reply comes later via ⟳.
+- [ ] Batch: auto-poll the pending batch (e.g. every minute while the chat is open). Nice-to-have.
+- [ ] Batch UI: not yet clicked through in a browser (API live-tested via curl).
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
 - [x] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
 - [x] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
@@ -80,9 +83,11 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - App attribution headers on every request, created hidden (no public rankings).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
+- Batch = `:batch` model suffix (no separate toggle); one pending batch per conversation, stored in meta.json; manual ⟳ only, no webhooks (LAN).
 - `session_id` = conversation id on every request (shared across branches): sticky provider routing from turn 1, Sessions grouping in OpenRouter logs. Ignored for routing when `provider.order` is set.
 
 ## Handoff notes
+- Batch: model id ending `:batch` → send/regenerate submit a one-request batch (`POST /batches`, `/v1/chat/completions`, `build_batch_body`) instead of streaming. SSE: `user_saved`, then `batch {PendingBatch}` (or `error` + `done` with an error reply). `meta.pending_batch {id, user_id, model, key_name, submitted_at}` blocks send/regenerate (409) until `POST …/batch/refresh` (poll once; done → reply appended, leaf set, pending cleared, upstream delete best-effort) or `POST …/batch/forget`. No upstream cancel exists: forget on a running batch just stops waiting, it is still billed. Fresh batches 404 for a few seconds → refresh reports `submitted` for 2 min. No tools in batch (one round; tool calls → warning). `provider` keeps only `only`/`allow_fallbacks` (others are a 400 for batch; logged as dropped).
 - 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
 - 2026-11-21: Added `--key` flag. Live test passed with `openrouter/free`. Auto-title deferred.
 - 2026-11-21: Scaffolded web/ (Svelte 5/Vite/TS6), embedded via rust-embed, added tools/build.sh + run.sh. Smoke-tested `/`, SPA fallback, `/api`.
@@ -117,3 +122,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: `--bind ADDR` CLI flag overrides config `bind` (socket activation still takes precedence).
 - 2026-11-22: Sidebar: per-row actions folded behind a ⋯ toggle (chats + groups); desktop sidebar drag-resizable (160–600px, saved in localStorage, hidden on phones). Builds; not yet clicked through in a browser.
 - 2026-11-22: Send conversation id as OpenRouter `session_id`. Unit-tested; not live-tested.
+- 2026-11-22: Batch models. Unit tests for body field order + result parsing. Live (Haiku 5.5 :batch): submit OK, refresh → in_progress, second send → 409; RESULT PENDING (see next line).
