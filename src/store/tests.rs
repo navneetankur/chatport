@@ -127,23 +127,6 @@ fn delete_removes_empty_group() {
 }
 
 #[test]
-fn migrates_old_layout() {
-    let t = TempDir::new();
-    let m = meta("Old chat");
-    let old = conv_root(&t).join(&m.id);
-    std::fs::create_dir_all(&old).unwrap();
-    std::fs::write(old.join("meta.json"), serde_json::to_vec(&m).unwrap()).unwrap();
-    std::fs::write(old.join("messages.jsonl"), "").unwrap();
-    let s = Store::open(t.0.clone()).unwrap();
-    assert!(!old.exists());
-    let l = s.list().unwrap();
-    assert_eq!(
-        (l[0].id.as_str(), l[0].title.as_str()),
-        (m.id.as_str(), "Old chat")
-    );
-}
-
-#[test]
 fn group_names_checked() {
     for bad in ["", " a", ".x", "a/b", UNGROUPED, "a\nb"] {
         assert!(check_group(bad).is_err(), "{bad:?}");

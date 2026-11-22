@@ -238,33 +238,10 @@ impl Store {
         let root = data_dir.join("conversations");
         std::fs::create_dir_all(root.join(UNGROUPED))
             .with_context(|| format!("creating {}", root.display()))?;
-        let store = Self {
+        Ok(Self {
             root,
             write: Mutex::new(()),
-        };
-        store.migrate()?;
-        return Ok(store);
-    }
-
-    /// Old layout `conversations/<id>/` -> `_ungrouped/<id>-<label>/`.
-    fn migrate(&self) -> Result<()> {
-        for e in std::fs::read_dir(&self.root)? {
-            let path = e?.path();
-            let meta_path = path.join("meta.json");
-            if !meta_path.is_file() {
-                continue;
-            }
-            let meta: Meta = serde_json::from_slice(&std::fs::read(&meta_path)?)
-                .with_context(|| format!("migrating {}", meta_path.display()))?;
-            let to = self
-                .root
-                .join(UNGROUPED)
-                .join(folder_name(&meta.id, &meta.title));
-            std::fs::rename(&path, &to)
-                .with_context(|| format!("moving {} to {}", path.display(), to.display()))?;
-            log::info!("migrated {} -> {}", path.display(), to.display());
-        }
-        Ok(())
+        })
     }
 
     /// Group folder names, including UNGROUPED.

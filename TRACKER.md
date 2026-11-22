@@ -59,7 +59,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] `@` autocomplete: debounced `GET /api/ls?conv=&prefix=` → dropdown (dir → append `/`, file → finish token).
 - [x] Editing a user message can remove its attachments (× per attachment while editing; the edit sends the rest).
 - [x] View sent attachments: click the 📎 chip → plain text in a new tab (blob URL); `.md` also gets "rendered" (DOMPurify'd HTML page).
-- [x] Chat groups: folder per group (`conversations/<group>/<id>-<label>/`, `_ungrouped` reserved), old layout migrated at startup. List = folder names + `messages.jsonl` mtime (no meta.json reads). Groups exist only while they have chats (created by "move to group", removed when empty). Sidebar: collapsible groups (state in localStorage, closed by default), group view at `#g/<name>` (new chat from there joins the group), ⇄ move, rename group, delete group (ungroup chats / delete all).
+- [x] Chat groups: folder per group (`conversations/<group>/<id>-<label>/`, `_ungrouped` reserved). Old layout was migrated by a one-off script (not in the code). List = folder names + `messages.jsonl` mtime (no meta.json reads). Groups exist only while they have chats (created by "move to group", removed when empty). Sidebar: collapsible groups (state in localStorage, closed by default), group view at `#g/<name>` (new chat from there joins the group), ⇄ move, rename group, delete group (ungroup chats / delete all).
 - [ ] Chat groups: not yet clicked through in a browser (API live-tested via curl).
 - [ ] Nice-to-have: per-group system prompt addendum (`<group>/group.json`).
 - [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.

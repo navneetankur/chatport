@@ -85,7 +85,7 @@ impl Config {
                 key: o,
             }),
             (None, None) if no_keys => {
-                bail!("no API key: use --key, OPENROUTER_API_KEY, or [[keys]] in config")
+                bail!("no API key: use --keyfile, OPENROUTER_API_KEY, or [[keys]] in config")
             }
             (None, None) => bail!("default_key {default:?} is not in [[keys]]"),
         }
