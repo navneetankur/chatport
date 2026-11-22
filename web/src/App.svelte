@@ -267,6 +267,9 @@
         if (r.message.error) error = r.message.error;
         await scrollDown();
         refreshList();
+      } else if (r.status === 'done') {
+        // Saved elsewhere (the server's auto-poll): reload to show it.
+        await open(conv.id);
       } else if (current.pending_batch) {
         const pb = current.pending_batch;
         pb.status = r.status;

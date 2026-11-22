@@ -26,6 +26,58 @@ pub struct Config {
     /// HTTP Basic auth; off when absent.
     #[serde(default)]
     pub auth: Option<Auth>,
+    #[serde(default)]
+    pub batch: BatchConfig,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct BatchConfig {
+    /// Longest gap between automatic checks of a pending batch ("30m", "1h",
+    /// …). "0" or "off" disables auto-poll.
+    #[serde(default = "default_poll_interval", deserialize_with = "de_duration")]
+    pub poll_interval: std::time::Duration,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval: default_poll_interval(),
+        }
+    }
+}
+
+fn default_poll_interval() -> std::time::Duration {
+    std::time::Duration::from_secs(3600)
+}
+
+fn de_duration<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::time::Duration, D::Error> {
+    let s = String::deserialize(d)?;
+    parse_duration(&s).map_err(serde::de::Error::custom)
+}
+
+/// `<n><s|m|h|d>`, or "0" / "off" for zero.
+pub fn parse_duration(s: &str) -> Result<std::time::Duration> {
+    let s = s.trim();
+    if s == "0" || s.eq_ignore_ascii_case("off") {
+        return Ok(std::time::Duration::ZERO);
+    }
+    let unit = s
+        .char_indices()
+        .last()
+        .map(|(i, _)| i)
+        .context("empty duration")?;
+    let n: u64 = s[..unit]
+        .trim()
+        .parse()
+        .with_context(|| format!("bad duration {s:?}: expected e.g. \"30m\", \"1h\", \"off\""))?;
+    let mult = match &s[unit..] {
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        _ => bail!("bad duration {s:?}: unit must be s, m, h or d"),
+    };
+    return Ok(std::time::Duration::from_secs(n * mult));
 }
 
 #[derive(Deserialize, Clone)]
@@ -214,5 +266,25 @@ mod tests {
         );
         let dup = "[[keys]]\nname=\"a\"\nkey=\"1\"\n[[keys]]\nname=\"a\"\nkey=\"2\"";
         assert!(cfg(dup).resolve_keys(None).is_err());
+    }
+
+    #[test]
+    fn batch_poll_interval() {
+        use std::time::Duration;
+        assert_eq!(cfg("").batch.poll_interval, Duration::from_secs(3600));
+        let c = cfg("[batch]\npoll_interval = \"30m\"");
+        assert_eq!(c.batch.poll_interval, Duration::from_secs(1800));
+        assert!(
+            cfg("[batch]\npoll_interval = \"off\"")
+                .batch
+                .poll_interval
+                .is_zero()
+        );
+        assert_eq!(parse_duration("2d").unwrap(), Duration::from_secs(172800));
+        assert_eq!(parse_duration(" 45s ").unwrap(), Duration::from_secs(45));
+        for bad in ["", "h", "5", "5x", "-1m", "1.5h"] {
+            assert!(parse_duration(bad).is_err(), "{bad:?}");
+        }
+        assert!(toml::from_str::<Config>("[batch]\npoll_interval = \"5x\"").is_err());
     }
 }

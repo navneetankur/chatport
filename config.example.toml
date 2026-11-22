@@ -24,3 +24,9 @@ default_model = "openrouter/free"
 # [auth]
 # user = "me"
 # password = "change-me"
+
+# Batch models (`<slug>:batch`): the server checks pending batches by itself,
+# first 5 min after submit, then with doubling gaps up to this interval.
+# "0" or "off" disables (⟳ in the UI still works).
+# [batch]
+# poll_interval = "1h"

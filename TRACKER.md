@@ -39,7 +39,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 
 ## Backlog / TODO
 - [x] Batch models (`<slug>:batch` from the normal picker): reply comes later via ⟳.
-- [ ] Batch: auto-poll the pending batch (e.g. every minute while the chat is open). Nice-to-have.
+- [x] Batch auto-poll, server side (`src/batch.rs` poller, `[batch] poll_interval`, default 1h).
 - [ ] Batch UI (incl. provider + expiry in the pending row): not yet clicked through in a browser (API live-tested via curl).
 - [x] Live test with real key (`openrouter/free`): streaming, usage/cost, multi-turn context, regenerate sibling — all OK.
 - [x] Verify cache hits with Claude Haiku: 2nd turn should show `cached_tokens > 0`. (Note: Anthropic has a min cacheable prompt size, ~1–4k tokens depending on model — use a long system prompt.)
@@ -87,6 +87,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - `session_id` = conversation id on every request (shared across branches): sticky provider routing from turn 1, Sessions grouping in OpenRouter logs. Ignored for routing when `provider.order` is set.
 
 ## Handoff notes
+- Batch auto-poll: `batch::start_poller` (skipped when `poll_interval` is 0). In-memory `AppState.batch_polls` (conv id → next check), filled by a startup scan of all metas and on submit; a 60 s tick checks due ones through the same `batch::refresh` as ⟳. Gap = batch age, min 5 min, max `poll_interval` (checks at 5, 10, 20, 40 min, then every interval), so restarts need no stored schedule. `AppState.batch_lock` serialises saving/clearing a pending batch (⟳ vs poller → saved once; loser gets `{status:"done"}` and the UI reloads). Batch gone upstream after 2 min → saved as an error reply. An open page does not update itself: reload or ⟳.
 - Batch: model id ending `:batch` → send/regenerate submit a one-request batch (`POST /batches`, `/v1/chat/completions`, `build_batch_body`) instead of streaming. SSE: `user_saved`, then `batch {PendingBatch}` (or `error` + `done` with an error reply). `meta.pending_batch {id, user_id, model, key_name, submitted_at}` blocks send/regenerate (409) until `POST …/batch/refresh` (poll once; done → reply appended, leaf set, pending cleared, upstream delete best-effort) or `POST …/batch/forget`. No upstream cancel exists: forget on a running batch just stops waiting, it is still billed. Fresh batches 404 for a few seconds → refresh reports `submitted` for 2 min. No tools in batch (one round; tool calls → warning). `provider` keeps only `only`/`allow_fallbacks` (others are a 400 for batch; logged as dropped).
 - 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
 - 2026-11-21: Added `--key` flag. Live test passed with `openrouter/free`. Auto-title deferred.
@@ -124,3 +125,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: Send conversation id as OpenRouter `session_id`. Unit-tested; not live-tested.
 - 2026-11-22: Batch models. Unit tests for body field order + result parsing. Live (Haiku 5.5 :batch): submit OK, refresh → in_progress, second send → 409; after ~8 min ⟳ saved "batch ok" (provider Anthropic, 20/6 tokens) and the upstream delete succeeded. Per-request usage has no cost → filled from batch-level usage (live-verified: 12/4 tokens → $0.0000016, matches batch pricing).
 - 2026-11-22: Batch pending row shows provider + expiry (`PendingBatch` flattens `BatchInfo {status, provider, expires_at}` from submit, updated on each refresh). Live: Anthropic + expires_at at submit, status saved on refresh.
+- 2026-11-22: Batch auto-poll (server side, doubling gaps capped at `[batch] poll_interval`). Moved batch code from api.rs to src/batch.rs. Tests: gap schedule, duration parsing. Live (poll_interval 1m): startup scan found the pending batch and checked it.

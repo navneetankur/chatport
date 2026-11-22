@@ -2,6 +2,7 @@
 
 mod api;
 mod auth;
+mod batch;
 mod config;
 mod files;
 mod listen;
@@ -21,6 +22,9 @@ pub struct AppState {
     pub config: config::Config,
     /// In-flight generations: conv id -> (generation id, cancel sender).
     pub running: api::Running,
+    /// Next automatic check per conversation with a pending batch.
+    pub batch_polls: batch::Polls,
+    pub batch_lock: batch::Lock,
 }
 
 struct Args {
@@ -111,7 +115,10 @@ async fn run(act: listen::Activation) -> Result<()> {
         )?),
         config: cfg.clone(),
         running: Default::default(),
+        batch_polls: Default::default(),
+        batch_lock: Default::default(),
     });
+    batch::start_poller(state.clone());
 
     let mut app = api::router(state).fallback(web::static_handler);
     match &cfg.auth {
