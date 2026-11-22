@@ -82,16 +82,16 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const listConversations = () => fetch('/api/conversations').then((r) => json<Meta[]>(r));
+export const listConversations = () => fetch('api/conversations').then((r) => json<Meta[]>(r));
 
 export const createConversation = () =>
-  fetch('/api/conversations', { method: 'POST' }).then((r) => json<Meta>(r));
+  fetch('api/conversations', { method: 'POST' }).then((r) => json<Meta>(r));
 
 export const getConversation = (id: string) =>
-  fetch(`/api/conversations/${id}`).then((r) => json<Conversation>(r));
+  fetch(`api/conversations/${id}`).then((r) => json<Conversation>(r));
 
 export async function deleteConversation(id: string): Promise<void> {
-  const r = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+  const r = await fetch(`api/conversations/${id}`, { method: 'DELETE' });
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
 }
 
@@ -142,16 +142,16 @@ export const sendMessage = (
   content: string,
   attachments: Attachment[],
   on: (e: StreamEvent) => void,
-) => streamPost(`/api/conversations/${id}/messages`, { parent_id, content, attachments }, on);
+) => streamPost(`api/conversations/${id}/messages`, { parent_id, content, attachments }, on);
 
 export const stop = (id: string) =>
-  fetch(`/api/conversations/${id}/stop`, { method: 'POST' }).then((r) => json<{ stopped: boolean }>(r));
+  fetch(`api/conversations/${id}/stop`, { method: 'POST' }).then((r) => json<{ stopped: boolean }>(r));
 
 export const regenerate = (id: string, user_id: string, on: (e: StreamEvent) => void) =>
-  streamPost(`/api/conversations/${id}/regenerate`, { user_id }, on);
+  streamPost(`api/conversations/${id}/regenerate`, { user_id }, on);
 
 export async function setLeaf(id: string, msgId: string): Promise<string> {
-  const r = await fetch(`/api/conversations/${id}/leaf`, {
+  const r = await fetch(`api/conversations/${id}/leaf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: msgId }),
@@ -171,14 +171,14 @@ let modelsCache: Promise<ModelInfo[]> | null = null;
 /** Fetched once per page load; a failed fetch is not cached. */
 export function listModels(): Promise<ModelInfo[]> {
   if (!modelsCache) {
-    modelsCache = fetch('/api/models').then((r) => json<ModelInfo[]>(r));
+    modelsCache = fetch('api/models').then((r) => json<ModelInfo[]>(r));
     modelsCache.catch(() => (modelsCache = null));
   }
   return modelsCache;
 }
 
 export const listKeys = () =>
-  fetch('/api/keys').then((r) => json<{ names: string[]; default: string }>(r));
+  fetch('api/keys').then((r) => json<{ names: string[]; default: string }>(r));
 
 export type MetaPatch = Partial<{
   title: string;
@@ -200,14 +200,14 @@ export interface FsEntry {
 export async function listFiles(conv: string | undefined, prefix: string): Promise<FsEntry[]> {
   const q = new URLSearchParams({ prefix });
   if (conv) q.set('conv', conv);
-  return json<FsEntry[]>(await fetch(`/api/ls?${q}`));
+  return json<FsEntry[]>(await fetch(`api/ls?${q}`));
 }
 
 /** Server-side file for an `@path` mention; throws with the server's reason. */
 export async function fetchFile(conv: string | undefined, path: string): Promise<Attachment> {
   const q = new URLSearchParams({ path });
   if (conv) q.set('conv', conv);
-  const r = await fetch(`/api/file?${q}`);
+  const r = await fetch(`api/file?${q}`);
   if (r.ok) return r.json();
   const body = await r.text();
   try {
@@ -219,7 +219,7 @@ export async function fetchFile(conv: string | undefined, path: string): Promise
 }
 
 export const patchConversation = (id: string, patch: MetaPatch) =>
-  fetch(`/api/conversations/${id}`, {
+  fetch(`api/conversations/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
