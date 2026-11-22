@@ -1,0 +1,6 @@
+# Started on first connection by chatport.socket. Adjust paths.
+[Unit]
+Requires=chatport.socket
+
+[Service]
+ExecStart=%h/.cargo/bin/chatport -c %h/.config/chatport/config.toml --keyfile %h/.config/chatport/key.txt

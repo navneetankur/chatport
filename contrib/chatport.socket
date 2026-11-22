@@ -1,0 +1,7 @@
+# Example systemd socket unit. Install as ~/.config/systemd/user/chatport.socket
+# then: systemctl --user enable --now chatport.socket
+[Socket]
+ListenStream=0.0.0.0:8787
+
+[Install]
+WantedBy=sockets.target

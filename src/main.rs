@@ -4,6 +4,7 @@ mod api;
 mod auth;
 mod config;
 mod files;
+mod listen;
 mod provider;
 mod store;
 mod tools;
@@ -106,10 +107,7 @@ async fn main() -> Result<()> {
         None => log::warn!("no [auth] in config: anyone on the network can use this"),
     }
 
-    let listener = tokio::net::TcpListener::bind(&cfg.bind)
-        .await
-        .with_context(|| format!("binding {}", cfg.bind))?;
-    log::info!("listening on http://{}", cfg.bind);
+    let listener = listen::listener(&cfg.bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }

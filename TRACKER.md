@@ -42,6 +42,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] Record actual model used: router ids like `openrouter/free` resolve to a real model; response chunks carry `model` — store that in the assistant msg instead of the requested id.
 - [x] Stop endpoint `POST /:id/stop`.
 - [x] UI colors: message box and send button are yellow on dark bg — ugly, pick something that fits the dark theme.
+- [x] systemd socket activation (`src/listen.rs`, example units in `contrib/`). Unusable activation → warn + bind from config. No idle exit.
 - [x] Chat title from first user msg (no AI): truncate to ~20 chars (fallback: conv id), instead of "New chat".
 - [x] Rename chat (UI + endpoint to update meta title).
 - [x] Show current reasoning effort somewhere visible, e.g. header next to title/model (only when set).
@@ -107,3 +108,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: User messages rendered as markdown via the same snippet as assistant ones. svelte-check clean; not clicked through in a browser yet.
 - 2026-11-22: Emacs keys in the message editor (web/src/emacsKeys.ts): C-a (twice = select all), C-e, Alt-←/→, C-w / Alt-Backspace, C-u, Alt-Enter newline. Deletes via execCommand so undo works. svelte-check clean, built; not tried in a browser. C-w likely still closes the tab outside app/PWA mode.
 - 2026-11-22: BYOK upstream cost: `Usage.upstream_cost` from `usage.cost_details.upstream_inference_cost` (`cost` is 0 for BYOK). Collapsed line + totals show cost+upstream; ⓘ shows non-zero ones, "Cost $0" if both 0. Parser unit-tested; field verified via curl on gemini-3.1-flash-lite, not clicked through in the UI.
+- 2026-11-22: systemd socket activation. 4 parse tests; live-tested with `systemd-socket-activate` (served on passed fd, config bind ignored).
