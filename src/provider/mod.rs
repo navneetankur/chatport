@@ -125,6 +125,9 @@ pub struct ChatRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
     /// Tools offered; empty = none.
     pub tools: Vec<ToolSpec>,
+    /// Stable per-conversation key (OpenRouter `session_id`: sticky provider
+    /// routing from the first request, log grouping).
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug)]

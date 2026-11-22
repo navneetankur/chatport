@@ -80,6 +80,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - App attribution headers on every request, created hidden (no public rankings).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
+- `session_id` = conversation id on every request (shared across branches): sticky provider routing from turn 1, Sessions grouping in OpenRouter logs. Ignored for routing when `provider.order` is set.
 
 ## Handoff notes
 - 2026-11-21: Backend done, 7 unit tests pass, no warnings. Smoke-tested with curl + fake key: create → send (with attachment) → SSE `user_saved/error/done` → partial msg persisted → leaf updated; bad leaf id rejected. Project moved to `workspace/rust/chatport`, renamed crate/binary to `chatport`.
@@ -115,3 +116,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: systemd socket activation. 4 parse tests; live-tested with `systemd-socket-activate` (served on passed fd, config bind ignored).
 - 2026-11-22: `--bind ADDR` CLI flag overrides config `bind` (socket activation still takes precedence).
 - 2026-11-22: Sidebar: per-row actions folded behind a ⋯ toggle (chats + groups); desktop sidebar drag-resizable (160–600px, saved in localStorage, hidden on phones). Builds; not yet clicked through in a browser.
+- 2026-11-22: Send conversation id as OpenRouter `session_id`. Unit-tested; not live-tested.

@@ -109,6 +109,10 @@ pub fn build_body(req: &ChatRequest) -> Value {
     if let Some(p) = req.options.as_ref().filter(|p| !p.is_null()) {
         body["provider"] = p.clone();
     }
+    if let Some(id) = req.session_id.as_deref().filter(|id| !id.is_empty()) {
+        // OpenRouter caps it at 256 chars.
+        body["session_id"] = json!(id.chars().take(256).collect::<String>());
+    }
     if let Some(e) = req.reasoning_effort {
         body["reasoning"] = json!({ "effort": e });
     }
@@ -339,7 +343,16 @@ mod tests {
             cache,
             reasoning_effort: None,
             tools: vec![],
+            session_id: None,
         }
+    }
+
+    #[test]
+    fn session_id_only_when_set() {
+        let mut r = req("x/y", CachePolicy::Off);
+        assert!(build_body(&r).get("session_id").is_none());
+        r.session_id = Some("abc123".into());
+        assert_eq!(build_body(&r)["session_id"], "abc123");
     }
 
     #[test]
