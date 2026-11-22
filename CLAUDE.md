@@ -10,7 +10,7 @@ Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embed
 - Provider abstraction stays thin: one `Provider` trait, OpenRouter only. Provider-specific stuff (caching markers, `provider` routing object) lives in `src/provider/openrouter.rs`.
 - Attachments: text/markdown only, stored inline in the message, flattened into the prompt in `api::flatten`.
 - Optional HTTP Basic auth via `[auth]` in config (`src/auth.rs`); off when absent. Plain HTTP, LAN only.
-- Frontend URLs are relative (`api/...`, Vite `base: './'`) so the app works behind a path prefix. Never add a leading `/`. This relies on the page always being `/` (routing is hash-only); don't add path-based routes.
+- Frontend URLs are relative (`api/...`, Vite `base: './'`) so the app works behind a path prefix. Never add a leading `/`. Today routing is hash-only, so the page is always at the root and plain `api/...` is correct. If you add path-based routes, be careful: it's an SPA, so `api.ts` and `index.html` are shared across all depths, and the `../` count must be worked out per request from the current path (or resolve against `import.meta.url`), not hard-coded.
 - Keep it small. Don't add features not in PLAN.md/TRACKER.md without asking.
 
 ## Commands
