@@ -8,6 +8,10 @@
 //! equals the batch's age (checks at 5, 10, 20, 40 min, …), capped at
 //! `[batch] poll_interval`. It depends only on `submitted_at`, so it survives
 //! restarts. Every pending batch is checked once at startup.
+//!
+//! The poller sleeps until the earliest due check; `schedule`/`unschedule`
+//! wake it (`AppState.batch_wake`) so it re-reads the earliest time. With
+//! nothing pending it sleeps until the next submit.
 
 use crate::AppState;
 use crate::api::{R, St, bad, context, ev, load_meta, record_model, save_reply};
@@ -31,8 +35,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 const VISIBLE_AFTER: Duration = Duration::from_secs(120);
 /// First automatic check after submit.
 const FIRST_GAP: Duration = Duration::from_secs(300);
-/// How often the poller looks for due batches.
-const TICK: Duration = Duration::from_secs(60);
 
 /// Next automatic check per conversation with a pending batch.
 pub type Polls = Mutex<HashMap<String, Instant>>;
@@ -56,11 +58,15 @@ fn schedule(s: &AppState, conv_id: &str, gap: Duration) {
             .lock()
             .unwrap()
             .insert(conv_id.to_string(), Instant::now() + gap);
+        // Stores a permit if the poller is busy, so the change is never missed.
+        s.batch_wake.notify_one();
     }
 }
 
 fn unschedule(s: &AppState, conv_id: &str) {
-    s.batch_polls.lock().unwrap().remove(conv_id);
+    if s.batch_polls.lock().unwrap().remove(conv_id).is_some() {
+        s.batch_wake.notify_one();
+    }
 }
 
 /// Submits the reply as a one-request batch. SSE: optional `user_saved`, then
@@ -293,10 +299,15 @@ pub fn start_poller(s: Arc<AppState>) {
             Ok(n) => log::info!("batch auto-poll every ≤{cap:?}; {n} pending at startup"),
             Err(e) => log::warn!("batch auto-poll: startup scan failed: {e:#}"),
         }
-        let mut tick = tokio::time::interval(TICK);
         loop {
-            tick.tick().await;
-            poll_due(&s, cap).await;
+            let next = s.batch_polls.lock().unwrap().values().min().copied();
+            match next {
+                Some(at) => tokio::select! {
+                    _ = tokio::time::sleep_until(at) => poll_due(&s, cap).await,
+                    _ = s.batch_wake.notified() => {}
+                },
+                None => s.batch_wake.notified().await,
+            }
         }
     });
 }
@@ -340,7 +351,7 @@ async fn poll_due(s: &Arc<AppState>, cap: Duration) {
                 // Includes a deleted conversation's folder: retry later anyway;
                 // the next refresh sees no meta and unschedules.
                 log::warn!("auto-poll {id}: {e:#}");
-                schedule(s, &id, cap.min(FIRST_GAP.max(TICK)));
+                schedule(s, &id, cap.min(FIRST_GAP));
             }
         }
     }

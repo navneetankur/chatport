@@ -25,6 +25,8 @@ pub struct AppState {
     /// Next automatic check per conversation with a pending batch.
     pub batch_polls: batch::Polls,
     pub batch_lock: batch::Lock,
+    /// Wakes the batch poller when `batch_polls` changes.
+    pub batch_wake: tokio::sync::Notify,
 }
 
 struct Args {
@@ -117,6 +119,7 @@ async fn run(act: listen::Activation) -> Result<()> {
         running: Default::default(),
         batch_polls: Default::default(),
         batch_lock: Default::default(),
+        batch_wake: Default::default(),
     });
     batch::start_poller(state.clone());
 
