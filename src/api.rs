@@ -3,7 +3,7 @@ use crate::files;
 use crate::provider::{
     CachePolicy, ChatEvent, ChatMessage, ChatRequest, ReasoningEffort, Role, ToolCall, Usage,
 };
-use crate::store::{Attachment, Message, Meta, ToolRound, new_id, now_ms};
+use crate::store::{self, Attachment, Message, Meta, ToolRound, new_id, now_ms};
 use crate::tools;
 use crate::tree;
 use axum::extract::{Path, Query, State};
@@ -53,6 +53,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/file", get(file))
         .route("/api/ls", get(ls))
         .route("/api/conversations", get(list).post(create))
+        .route(
+            "/api/groups/{name}",
+            axum::routing::patch(rename_group).delete(delete_group),
+        )
         .route(
             "/api/conversations/{id}",
             get(get_conv).patch(patch_conv).delete(delete_conv),
@@ -118,8 +122,42 @@ async fn ls(State(s): St, Query(q): Query<LsQuery>) -> R<Json<Vec<files::Entry>>
     Ok(Json(entries))
 }
 
-async fn list(State(s): St) -> R<Json<Vec<Meta>>> {
+async fn list(State(s): St) -> R<Json<Vec<store::Summary>>> {
     Ok(Json(s.store.list()?))
+}
+
+#[derive(Deserialize)]
+struct GroupRenameReq {
+    name: String,
+}
+
+async fn rename_group(
+    State(s): St,
+    Path(name): Path<String>,
+    Json(r): Json<GroupRenameReq>,
+) -> R<StatusCode> {
+    s.store
+        .rename_group(&name, r.name.trim())
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct GroupDeleteQuery {
+    /// true = delete the chats too; false = move them to ungrouped.
+    #[serde(default)]
+    chats: bool,
+}
+
+async fn delete_group(
+    State(s): St,
+    Path(name): Path<String>,
+    Query(q): Query<GroupDeleteQuery>,
+) -> R<StatusCode> {
+    s.store
+        .delete_group(&name, q.chats)
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, Default)]
@@ -230,6 +268,9 @@ struct PatchReq {
     /// "" clears.
     file_root: Option<String>,
     tools: Option<bool>,
+    /// Move to this group; null or "" = ungrouped.
+    #[serde(default, deserialize_with = "some_option")]
+    group: Option<Option<String>>,
 }
 fn some_option<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
@@ -246,6 +287,13 @@ async fn patch_conv(
     Json(r): Json<PatchReq>,
 ) -> R<Json<Meta>> {
     let mut meta = load_meta(&s, &id)?;
+    if let Some(g) = &r.group {
+        let g = g.as_deref().map(str::trim).filter(|g| !g.is_empty());
+        if let Some(g) = g {
+            store::check_group(g).map_err(|e| bad(&format!("{e:#}")))?;
+        }
+        s.store.move_to(&id, g)?;
+    }
     if let Some(t) = r.title {
         meta.title = t;
     }

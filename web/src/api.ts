@@ -82,7 +82,30 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const listConversations = () => fetch('api/conversations').then((r) => json<Meta[]>(r));
+/** Sidebar row: from folder names and file times, not meta.json. */
+export interface Summary {
+  id: string;
+  group: string | null;
+  title: string;
+  updated_at: number;
+}
+
+export const listConversations = () => fetch('api/conversations').then((r) => json<Summary[]>(r));
+
+export async function renameGroup(name: string, to: string): Promise<void> {
+  const r = await fetch(`api/groups/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: to }),
+  });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+}
+
+/** withChats: delete the chats too; else they become ungrouped. */
+export async function deleteGroup(name: string, withChats: boolean): Promise<void> {
+  const r = await fetch(`api/groups/${encodeURIComponent(name)}?chats=${withChats}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+}
 
 export const createConversation = () =>
   fetch('api/conversations', { method: 'POST' }).then((r) => json<Meta>(r));
@@ -190,6 +213,7 @@ export type MetaPatch = Partial<{
   key_name: string | null; // null = config default
   file_root: string; // "" clears
   tools: boolean;
+  group: string | null; // null or "" = ungrouped
 }>;
 
 export interface FsEntry {

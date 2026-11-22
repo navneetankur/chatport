@@ -1,14 +1,43 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import * as api from './api';
-  import type { Attachment, Message, Meta } from './api';
+  import type { Attachment, Message, Meta, Summary } from './api';
   import { pathTo, siblings } from './tree';
   import { renderMarkdown } from './markdown';
   import { codeCopy, copyWithFeedback, downloadText, openHtml, openText } from './clipboard';
   import Settings from './Settings.svelte';
   import MessageInput from './MessageInput.svelte';
 
-  let convs = $state<Meta[]>([]);
+  let convs = $state<Summary[]>([]);
+  /** Group shown in the main pane (no chat open). */
+  let viewGroup = $state<string | null>(null);
+  let deletingGroup = $state<string | null>(null);
+
+  const EXPANDED_KEY = 'chatport.expandedGroups';
+  function loadExpanded(): string[] {
+    try {
+      return JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '[]');
+    } catch {
+      return [];
+    }
+  }
+  let expanded = $state<string[]>(loadExpanded());
+  function toggleGroup(g: string) {
+    expanded = expanded.includes(g) ? expanded.filter((x) => x !== g) : [...expanded, g];
+    try {
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded));
+    } catch {
+      /* collapse state is optional */
+    }
+  }
+
+  /** Group name -> chats (newest first), names sorted. */
+  const groups = $derived.by(() => {
+    const m = new Map<string, Summary[]>();
+    for (const c of convs) if (c.group) m.set(c.group, [...(m.get(c.group) ?? []), c]);
+    return new Map([...m].sort(([a], [b]) => a.localeCompare(b)));
+  });
+  const ungrouped = $derived(convs.filter((c) => !c.group));
   let current = $state<Meta | null>(null);
   let messages = $state<Message[]>([]);
   let leaf = $state<string | null>(null);
@@ -43,13 +72,15 @@
   async function refreshList() {
     convs = await api.listConversations();
     const fresh = current && convs.find((c) => c.id === current!.id);
-    if (fresh) current = fresh;
+    // List titles are folder labels; only pick up server-side title changes.
+    if (fresh && current && fresh.title !== current.title) current.title = fresh.title;
   }
 
   async function open(id: string) {
     error = '';
     const c = await api.getConversation(id);
     current = c.meta;
+    viewGroup = null;
     showSettings = false;
     showSidebar = false;
     messages = c.messages;
@@ -59,7 +90,9 @@
   }
 
   async function newChat() {
+    const group = viewGroup;
     const m = await api.createConversation();
+    if (group) await api.patchConversation(m.id, { group });
     await refreshList();
     await open(m.id);
   }
@@ -67,7 +100,69 @@
   let renaming = $state<string | null>(null);
   let renameText = $state('');
 
-  function startRename(c: Meta) {
+  function openGroup(g: string) {
+    current = null;
+    messages = [];
+    leaf = null;
+    showSettings = false;
+    showSidebar = false;
+    viewGroup = g;
+    location.hash = 'g/' + encodeURIComponent(g);
+  }
+
+  async function act(f: () => Promise<void>) {
+    try {
+      error = '';
+      await f();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  function moveChat(c: Summary) {
+    const to = prompt('Move to group (new name creates it, empty = ungrouped):', c.group ?? '');
+    if (to === null || to.trim() === (c.group ?? '')) return;
+    act(async () => {
+      await api.patchConversation(c.id, { group: to.trim() || null });
+      await refreshList();
+    });
+  }
+
+  function renameGroupUi(g: string) {
+    const to = prompt('Rename group:', g)?.trim();
+    if (!to || to === g) return;
+    act(async () => {
+      await api.renameGroup(g, to);
+      if (expanded.includes(g)) {
+        toggleGroup(g);
+        toggleGroup(to);
+      }
+      if (viewGroup === g) openGroup(to);
+      await refreshList();
+    });
+  }
+
+  function removeGroup(g: string, withChats: boolean) {
+    deletingGroup = null;
+    if (withChats && !confirm(`Delete group "${g}" and all its chats? This can't be undone.`)) return;
+    const ids = (groups.get(g) ?? []).map((c) => c.id);
+    act(async () => {
+      await api.deleteGroup(g, withChats);
+      if (viewGroup === g) {
+        viewGroup = null;
+        location.hash = '';
+      }
+      if (withChats && current && ids.includes(current.id)) {
+        current = null;
+        messages = [];
+        leaf = null;
+        location.hash = '';
+      }
+      await refreshList();
+    });
+  }
+
+  function startRename(c: Summary) {
     renaming = c.id;
     renameText = c.title;
   }
@@ -314,7 +409,8 @@
     try {
       await refreshList();
       const id = location.hash.slice(1);
-      if (id) await open(id);
+      if (id.startsWith('g/')) openGroup(decodeURIComponent(id.slice(2)));
+      else if (id) await open(id);
     } catch (e) {
       error = String(e);
     }
@@ -327,27 +423,48 @@
   {/if}
   <aside class:open={showSidebar}>
     <button class="new" onclick={newChat}>+ New chat</button>
+    {#snippet chatRow(c: Summary)}
+      <li class:active={current?.id === c.id} class:ingroup={!!c.group}>
+        {#if renaming === c.id}
+          <input
+            class="rename"
+            bind:value={renameText}
+            use:focus
+            onblur={submitRename}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') submitRename();
+              else if (e.key === 'Escape') renaming = null;
+            }}
+          />
+        {:else}
+          <button class="title" onclick={() => open(c.id)} ondblclick={() => startRename(c)}>{c.title}</button>
+          <button class="del" title="Move to group" onclick={() => moveChat(c)}>⇄</button>
+          <button class="del" title="Rename" onclick={() => startRename(c)}>✎</button>
+          <button class="del" title="Delete" onclick={() => remove(c.id)}>×</button>
+        {/if}
+      </li>
+    {/snippet}
     <ul>
-      {#each convs as c (c.id)}
-        <li class:active={current?.id === c.id}>
-          {#if renaming === c.id}
-            <input
-              class="rename"
-              bind:value={renameText}
-              use:focus
-              onblur={submitRename}
-              onkeydown={(e) => {
-                if (e.key === 'Enter') submitRename();
-                else if (e.key === 'Escape') renaming = null;
-              }}
-            />
-          {:else}
-            <button class="title" onclick={() => open(c.id)} ondblclick={() => startRename(c)}>{c.title}</button>
-            <button class="del" title="Rename" onclick={() => startRename(c)}>✎</button>
-            <button class="del" title="Delete" onclick={() => remove(c.id)}>×</button>
-          {/if}
+      {#each [...groups] as [g, chats] (g)}
+        {@const open_ = expanded.includes(g)}
+        <li class="group" class:active={viewGroup === g}>
+          <button class="tog" title={open_ ? 'Collapse' : 'Expand'} onclick={() => toggleGroup(g)}>{open_ ? '▾' : '▸'}</button>
+          <button class="title" onclick={() => openGroup(g)}>{g} <span class="count">{chats.length}</span></button>
+          <button class="del" title="Rename group" onclick={() => renameGroupUi(g)}>✎</button>
+          <button class="del" title="Delete group" onclick={() => (deletingGroup = deletingGroup === g ? null : g)}>×</button>
         </li>
+        {#if deletingGroup === g}
+          <li class="gconfirm">
+            <button onclick={() => removeGroup(g, false)}>Ungroup chats</button>
+            <button class="danger" onclick={() => removeGroup(g, true)}>Delete all</button>
+            <button onclick={() => (deletingGroup = null)}>Cancel</button>
+          </li>
+        {/if}
+        {#if open_}
+          {#each chats as c (c.id)}{@render chatRow(c)}{/each}
+        {/if}
       {/each}
+      {#each ungrouped as c (c.id)}{@render chatRow(c)}{/each}
     </ul>
   </aside>
 
@@ -355,7 +472,7 @@
     <header>
       <button class="menu" title="Chats" onclick={() => (showSidebar = !showSidebar)}>☰</button>
       <span class="htitle">
-        {current ? `${current.title} — ${current.model}` : 'chatport'}
+        {current ? `${current.title} — ${current.model}` : viewGroup ? `Group: ${viewGroup}` : 'chatport'}
         {#if current?.reasoning_effort}
           <span class="effort" title="Reasoning effort">· {current.reasoning_effort} effort</span>
         {/if}
@@ -385,6 +502,16 @@
       {/if}
     {/snippet}
     <div class="msgs" bind:this={scroller}>
+      {#if viewGroup && !current}
+        <div class="gview">
+          <ul>
+            {#each groups.get(viewGroup) ?? [] as c (c.id)}
+              <li><button class="title" onclick={() => open(c.id)}>{c.title}</button></li>
+            {/each}
+          </ul>
+          <p class="hint">Send a message below to start a new chat in this group.</p>
+        </div>
+      {/if}
       {#each [...path, ...(streaming ? [streaming] : [])] as m (m.id || 'streaming')}
         <div class="msg {m.role}">
           {#if m.role === 'user'}
@@ -590,6 +717,15 @@
     white-space: nowrap;
   }
   .del { background: none; border: none; color: #888; cursor: pointer; padding: 0 6px; }
+  li.group .title { font-weight: 600; }
+  li.ingroup .title { padding-left: 26px; }
+  .count { font-weight: normal; color: #888; font-size: 0.85em; }
+  .tog { background: none; border: none; color: #888; cursor: pointer; padding: 0 0 0 8px; width: 20px; }
+  .gconfirm { gap: 4px; padding: 4px 8px; flex-wrap: wrap; }
+  .gconfirm button { font-size: 0.85em; padding: 2px 6px; }
+  .gconfirm .danger { color: #e55; }
+  .gview { max-width: 800px; margin: 0 auto; }
+  .gview .hint { color: #888; }
   .rename { flex: 1; margin: 4px 6px; padding: 4px 6px; font: inherit; }
   main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   header {

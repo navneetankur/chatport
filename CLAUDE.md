@@ -6,7 +6,7 @@ Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embed
 **Read first:** `TRACKER.md` (status, next steps, handoff notes), then `PLAN.md` (design) as needed.
 
 ## Ground rules
-- Storage: `conversations/<id>/meta.json` (mutable, atomic rewrite) + `messages.jsonl` (append-only tree). Never rewrite messages.jsonl.
+- Storage: `conversations/<group>/<id>-<label>/meta.json` (mutable, atomic rewrite) + `messages.jsonl` (append-only tree). `<group>` = group name or `_ungrouped`; `<label>` = title made folder-safe. Paths are looked up by id prefix on every op (`Store::find`), moves/renames under the write lock. Never rewrite messages.jsonl.
 - Provider abstraction stays thin: one `Provider` trait, OpenRouter only. Provider-specific stuff (caching markers, `provider` routing object) lives in `src/provider/openrouter.rs`.
 - Attachments: text/markdown only, stored inline in the message, flattened into the prompt in `api::flatten`.
 - Optional HTTP Basic auth via `[auth]` in config (`src/auth.rs`); off when absent. Plain HTTP, LAN only.
