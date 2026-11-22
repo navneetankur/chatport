@@ -44,17 +44,20 @@ fn take_fd() -> Result<tokio::net::TcpListener> {
     return Ok(tokio::net::TcpListener::from_std(std_l)?);
 }
 
-/// Read and clear the `LISTEN_*` vars. Call from `main` before any threads
-/// (including the tokio runtime) exist: `remove_var` races with any concurrent
-/// env read, including libc's own (`getaddrinfo`, `localtime`, ...).
-pub fn take_activation() -> Activation {
+/// Read and clear the `LISTEN_*` vars.
+///
+/// # Safety
+/// The process must be single-threaded (call from `main` before the tokio
+/// runtime is built): `remove_var` races with any concurrent env read,
+/// including libc's own (`getaddrinfo`, `localtime`, ...).
+pub unsafe fn take_activation() -> Activation {
     let act = parse_env(
         std::env::var("LISTEN_PID").ok().as_deref(),
         std::env::var("LISTEN_FDS").ok().as_deref(),
         std::process::id(),
     );
     // Don't leak activation vars to anything we spawn.
-    // SAFETY: per the contract above, the process is still single-threaded.
+    // SAFETY: caller guarantees we are single-threaded.
     unsafe {
         std::env::remove_var("LISTEN_PID");
         std::env::remove_var("LISTEN_FDS");

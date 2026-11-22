@@ -72,8 +72,8 @@ fn read_keyfile(path: &std::path::Path) -> Result<String> {
 }
 
 fn main() -> Result<()> {
-    // Must run while single-threaded: it clears env vars.
-    let act = listen::take_activation();
+    // SAFETY: no threads exist yet; the tokio runtime is built below.
+    let act = unsafe { listen::take_activation() };
     return tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
