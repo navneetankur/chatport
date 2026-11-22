@@ -109,3 +109,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: Emacs keys in the message editor (web/src/emacsKeys.ts): C-a (twice = select all), C-e, Alt-←/→, C-w / Alt-Backspace, C-u, Alt-Enter newline. Deletes via execCommand so undo works. svelte-check clean, built; not tried in a browser. C-w likely still closes the tab outside app/PWA mode.
 - 2026-11-22: BYOK upstream cost: `Usage.upstream_cost` from `usage.cost_details.upstream_inference_cost` (`cost` is 0 for BYOK). Collapsed line + totals show cost+upstream; ⓘ shows non-zero ones, "Cost $0" if both 0. Parser unit-tested; field verified via curl on gemini-3.1-flash-lite, not clicked through in the UI.
 - 2026-11-22: systemd socket activation. 4 parse tests; live-tested with `systemd-socket-activate` (served on passed fd, config bind ignored).
+- 2026-11-22: `--bind ADDR` CLI flag overrides config `bind` (socket activation still takes precedence).

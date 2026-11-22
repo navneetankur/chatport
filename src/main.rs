@@ -26,6 +26,7 @@ pub struct AppState {
 struct Args {
     config: Option<PathBuf>,
     keyfile: Option<PathBuf>,
+    bind: Option<String>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -33,6 +34,7 @@ fn parse_args() -> Result<Args> {
     let mut out = Args {
         config: None,
         keyfile: None,
+        bind: None,
     };
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -44,13 +46,15 @@ fn parse_args() -> Result<Args> {
                     &args.next().context("--keyfile needs a path")?,
                 ))
             }
+            "--bind" => out.bind = Some(args.next().context("--bind needs an address")?),
             // Keys on the command line are visible to every user via ps / /proc.
             "--key" => anyhow::bail!("--key was removed (visible in ps); use --keyfile PATH"),
             "--help" | "-h" => {
                 println!(
-                    "usage: chatport [--config PATH] [--keyfile PATH]\n  \
+                    "usage: chatport [--config PATH] [--keyfile PATH] [--bind ADDR]\n  \
                      config default: ~/.config/chatport/config.toml\n  \
-                     --keyfile / OPENROUTER_API_KEY override the default config key"
+                     --keyfile / OPENROUTER_API_KEY override the default config key\n  \
+                     --bind overrides the config bind (systemd socket activation still wins)"
                 );
                 std::process::exit(0);
             }
@@ -90,6 +94,10 @@ async fn run(act: listen::Activation) -> Result<()> {
         None => std::env::var("OPENROUTER_API_KEY").ok(),
     };
     cfg.resolve_keys(override_key)?;
+    if let Some(b) = args.bind {
+        log::info!("bind {b:?} from --bind overrides config {:?}", cfg.bind);
+        cfg.bind = b;
+    }
     log::info!(
         "API keys: {:?} (default {:?})",
         cfg.key_names(),

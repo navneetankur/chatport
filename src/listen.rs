@@ -72,7 +72,9 @@ pub async fn listener(act: Activation, bind: &str) -> Result<tokio::net::TcpList
         Activation::One => match take_fd() {
             Ok(l) => {
                 let addr = l.local_addr()?;
-                log::info!("socket-activated, listening on http://{addr} (config bind ignored)");
+                log::info!(
+                    "socket-activated, listening on http://{addr} (configured bind ignored)"
+                );
                 return Ok(l);
             }
             Err(e) => log::warn!("socket activation unusable ({e:#}); binding {bind}"),
