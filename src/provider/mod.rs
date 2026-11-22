@@ -127,7 +127,7 @@ pub struct ChatRequest {
     pub tools: Vec<ToolSpec>,
     /// Stable per-conversation key (OpenRouter `session_id`: sticky provider
     /// routing from the first request, log grouping).
-    pub session_id: Option<String>,
+    pub session_id: String,
 }
 
 #[derive(Debug)]

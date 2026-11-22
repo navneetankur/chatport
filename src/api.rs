@@ -576,7 +576,7 @@ fn generate(
         } else {
             vec![]
         },
-        session_id: Some(meta.id.clone()),
+        session_id: meta.id.clone(),
     };
     let conv_id = meta.id.clone();
     let gen_id = new_id();
