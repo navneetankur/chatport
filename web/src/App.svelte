@@ -50,6 +50,30 @@
   const path = $derived(pathTo(messages, leaf));
   let showSettings = $state(false);
   let showSidebar = $state(false); // phone only
+  /** Row whose action buttons are expanded ('c:<id>' or 'g:<name>'). */
+  let rowMenu = $state<string | null>(null);
+  const toggleMenu = (k: string) => (rowMenu = rowMenu === k ? null : k);
+
+  // Desktop sidebar width, drag-resizable, remembered per browser.
+  let sideWidth = $state(240);
+  try {
+    const w = Number(localStorage.getItem('sideWidth'));
+    if (w) sideWidth = w;
+  } catch {}
+  function startResize(e: PointerEvent) {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = sideWidth;
+    const move = (ev: PointerEvent) => {
+      sideWidth = Math.min(600, Math.max(160, w0 + ev.clientX - x0));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      try { localStorage.setItem('sideWidth', String(sideWidth)); } catch {}
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   /** Usage summed over the shown branch. */
   const totals = $derived.by(() => {
@@ -417,7 +441,7 @@
   });
 </script>
 
-<div class="app">
+<div class="app" style="--side-w: {sideWidth}px">
   {#if showSidebar}
     <button class="backdrop" aria-label="Close menu" onclick={() => (showSidebar = false)}></button>
   {/if}
@@ -438,9 +462,12 @@
           />
         {:else}
           <button class="title" onclick={() => open(c.id)} ondblclick={() => startRename(c)}>{c.title}</button>
-          <button class="del" title="Move to group" onclick={() => moveChat(c)}>⇄</button>
-          <button class="del" title="Rename" onclick={() => startRename(c)}>✎</button>
-          <button class="del" title="Delete" onclick={() => remove(c.id)}>×</button>
+          {#if rowMenu === 'c:' + c.id}
+            <button class="del" title="Move to group" onclick={() => { rowMenu = null; moveChat(c); }}>⇄</button>
+            <button class="del" title="Rename" onclick={() => { rowMenu = null; startRename(c); }}>✎</button>
+            <button class="del" title="Delete" onclick={() => { rowMenu = null; remove(c.id); }}>×</button>
+          {/if}
+          <button class="del" title="Actions" onclick={() => toggleMenu('c:' + c.id)}>{rowMenu === 'c:' + c.id ? '‹' : '⋯'}</button>
         {/if}
       </li>
     {/snippet}
@@ -450,8 +477,11 @@
         <li class="group" class:active={viewGroup === g}>
           <button class="tog" title={open_ ? 'Collapse' : 'Expand'} onclick={() => toggleGroup(g)}>{open_ ? '▾' : '▸'}</button>
           <button class="title" onclick={() => openGroup(g)}>{g} <span class="count">{chats.length}</span></button>
-          <button class="del" title="Rename group" onclick={() => renameGroupUi(g)}>✎</button>
-          <button class="del" title="Delete group" onclick={() => (deletingGroup = deletingGroup === g ? null : g)}>×</button>
+          {#if rowMenu === 'g:' + g}
+            <button class="del" title="Rename group" onclick={() => { rowMenu = null; renameGroupUi(g); }}>✎</button>
+            <button class="del" title="Delete group" onclick={() => { rowMenu = null; deletingGroup = deletingGroup === g ? null : g; }}>×</button>
+          {/if}
+          <button class="del" title="Actions" onclick={() => toggleMenu('g:' + g)}>{rowMenu === 'g:' + g ? '‹' : '⋯'}</button>
         </li>
         {#if deletingGroup === g}
           <li class="gconfirm">
@@ -467,6 +497,7 @@
       {#each ungrouped as c (c.id)}{@render chatRow(c)}{/each}
     </ul>
   </aside>
+  <div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={startResize}></div>
 
   <main>
     <header>
@@ -694,7 +725,8 @@
   :global(#app) { height: 100%; }
   .app { display: flex; height: 100%; }
   aside {
-    width: 240px;
+    width: var(--side-w, 240px);
+    flex-shrink: 0;
     border-right: 1px solid #8884;
     display: flex;
     flex-direction: column;
@@ -808,8 +840,11 @@
   .diff .da { color: #2a9d4a; }
   .diff .dd { color: #d0453f; }
   .diff .dh { opacity: 0.6; }
+  .resizer { width: 5px; margin-left: -3px; cursor: col-resize; flex-shrink: 0; }
+  .resizer:hover { background: #8884; }
   .menu, .backdrop { display: none; }
   @media (max-width: 640px) {
+    .resizer { display: none; }
     .menu {
       display: block;
       background: none;
