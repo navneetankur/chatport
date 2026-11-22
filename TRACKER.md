@@ -122,4 +122,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: `--bind ADDR` CLI flag overrides config `bind` (socket activation still takes precedence).
 - 2026-11-22: Sidebar: per-row actions folded behind a ⋯ toggle (chats + groups); desktop sidebar drag-resizable (160–600px, saved in localStorage, hidden on phones). Builds; not yet clicked through in a browser.
 - 2026-11-22: Send conversation id as OpenRouter `session_id`. Unit-tested; not live-tested.
-- 2026-11-22: Batch models. Unit tests for body field order + result parsing. Live (Haiku 5.5 :batch): submit OK, refresh → in_progress, second send → 409; RESULT PENDING (see next line).
+- 2026-11-22: Batch models. Unit tests for body field order + result parsing. Live (Haiku 5.5 :batch): submit OK, refresh → in_progress, second send → 409; after ~8 min ⟳ saved "batch ok" (provider Anthropic, 20/6 tokens) and the upstream delete succeeded. Per-request usage has no cost → filled from batch-level usage (unit-tested, not yet seen live).

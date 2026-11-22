@@ -185,6 +185,17 @@ fn usage_from(u: &Value) -> Usage {
     };
 }
 
+/// Per-request usage lacks `cost`; the batch-level one has it. With one
+/// request per batch they are the same request, so fill the gap from it.
+fn merge_batch_cost(req: Option<Usage>, batch: Option<Usage>) -> Option<Usage> {
+    let Some(mut u) = req else { return batch };
+    if let Some(b) = batch {
+        u.cost = u.cost.or(b.cost);
+        u.upstream_cost = u.upstream_cost.or(b.upstream_cost);
+    }
+    return Some(u);
+}
+
 /// Interprets `GET /batches/{id}`.
 pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
     let status = v["status"].as_str().unwrap_or("unknown");
@@ -236,11 +247,10 @@ pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
         provider: s("/provider")
             .or_else(|| v["provider"].as_str().map(str::to_string))
             .filter(|p| !p.is_empty()),
-        usage: body
-            .get("usage")
-            .filter(|u| !u.is_null())
-            .map(usage_from)
-            .or(batch_usage),
+        usage: merge_batch_cost(
+            body.get("usage").filter(|u| !u.is_null()).map(usage_from),
+            batch_usage,
+        ),
         error: None,
         tool_calls,
     }));
@@ -699,9 +709,9 @@ mod tests {
                     "model": "anthropic/claude-x",
                     "choices": [{ "message": { "content": "hi", "reasoning": "hm",
                         "tool_calls": [{ "function": { "name": "read_file" } }] } }],
-                    "usage": { "prompt_tokens": 5, "completion_tokens": 2, "cost": 0.01 }
+                    "usage": { "prompt_tokens": 5, "completion_tokens": 2 }
                 }}}
-            ]}),
+            ], "usage": { "prompt_tokens": 5, "completion_tokens": 2, "cost": 0.01 }}),
         )
         .unwrap();
         let BatchPoll::Done(r) = p else { panic!() };
