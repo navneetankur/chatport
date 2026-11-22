@@ -8,7 +8,7 @@ const FD_START: i32 = 3;
 
 /// What the `LISTEN_*` environment says.
 #[derive(Debug, PartialEq)]
-enum Activation {
+pub enum Activation {
     /// Not socket-activated (vars absent, or meant for another process).
     None,
     /// Exactly one fd passed to us.
@@ -44,21 +44,27 @@ fn take_fd() -> Result<tokio::net::TcpListener> {
     return Ok(tokio::net::TcpListener::from_std(std_l)?);
 }
 
-/// Socket-activated listener if systemd passed one, else bind `bind`.
-pub async fn listener(bind: &str) -> Result<tokio::net::TcpListener> {
+/// Read and clear the `LISTEN_*` vars. Call from `main` before any threads
+/// (including the tokio runtime) exist: `remove_var` races with any concurrent
+/// env read, including libc's own (`getaddrinfo`, `localtime`, ...).
+pub fn take_activation() -> Activation {
     let act = parse_env(
         std::env::var("LISTEN_PID").ok().as_deref(),
         std::env::var("LISTEN_FDS").ok().as_deref(),
         std::process::id(),
     );
     // Don't leak activation vars to anything we spawn.
-    // SAFETY: called once at startup, before the server runs; tokio's idle
-    // worker threads exist but nothing else is reading the environment yet.
+    // SAFETY: per the contract above, the process is still single-threaded.
     unsafe {
         std::env::remove_var("LISTEN_PID");
         std::env::remove_var("LISTEN_FDS");
         std::env::remove_var("LISTEN_FDNAMES");
     }
+    return act;
+}
+
+/// Socket-activated listener if `act` says systemd passed one, else bind `bind`.
+pub async fn listener(act: Activation, bind: &str) -> Result<tokio::net::TcpListener> {
     match act {
         Activation::One => match take_fd() {
             Ok(l) => {

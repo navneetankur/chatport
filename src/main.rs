@@ -71,8 +71,16 @@ fn read_keyfile(path: &std::path::Path) -> Result<String> {
     return Ok(key.to_string());
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Must run while single-threaded: it clears env vars.
+    let act = listen::take_activation();
+    return tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(act));
+}
+
+async fn run(act: listen::Activation) -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = parse_args()?;
@@ -107,7 +115,7 @@ async fn main() -> Result<()> {
         None => log::warn!("no [auth] in config: anyone on the network can use this"),
     }
 
-    let listener = listen::listener(&cfg.bind).await?;
+    let listener = listen::listener(act, &cfg.bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
