@@ -23,6 +23,3 @@
 - [ ] llmjob: Ctrl-C during `run` leaves the user message without a reply; the
   next `-c` stacks a second user message under it. Save a partial reply on
   SIGINT if it bothers.
-- [ ] llmjob: confirm live multi-file batch `get --dir` + single-request `get`
-  to stdout (submitted 2026-11-23; first submit hit the custom_id charset error,
-  fixed).

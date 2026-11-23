@@ -29,4 +29,6 @@
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
 - `ls` local jobs; `rm` deletes upstream (refused while running: no cancel) + local.
 - live-tested 2026-11-23 with `openrouter/free`: run, `-c last`, `-m -`, keep,
-  `--save`, `-c <suffix> --effort low`.
+  `--save`, `-c <suffix> --effort low`. Batch (Haiku 5.5): 2-file `--dir`
+  job → `out/a.txt`, `out/b.txt` with `--headers` profile, $0.000068; 1-request
+  job → stdout. Both ~8 min, `ls` showed `completed`.
