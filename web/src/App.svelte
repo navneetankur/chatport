@@ -896,7 +896,7 @@
     >
       {#snippet actions(submit, can)}
         {#if busy}
-          <button type="button" onclick={stopGen}>Stop</button>
+          <button type="button" onclick={stopGen} aria-label="Stop" title="Stop"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg></button>
         {:else}
           <button type="submit" disabled={!can || !!current?.pending_batch} aria-label="Send" title="Send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
         {/if}
