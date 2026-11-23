@@ -65,16 +65,30 @@
     saving = true;
     error = '';
     try {
-      const m = await api.patchConversation(meta.id, {
-        model: model.trim(),
-        system,
-        cache,
-        reasoning_effort: effort || null,
-        key_name: keyName || null,
-        file_root: fileRoot.trim(),
-        tools,
-        provider: Object.keys(prov).length ? prov : null,
-      });
+      const provider = Object.keys(prov).length ? prov : null;
+      // A draft (id "") is not on the server yet: keep the settings locally.
+      const m = meta.id
+        ? await api.patchConversation(meta.id, {
+            model: model.trim(),
+            system,
+            cache,
+            reasoning_effort: effort || null,
+            key_name: keyName || null,
+            file_root: fileRoot.trim(),
+            tools,
+            provider,
+          })
+        : {
+            ...meta,
+            model: model.trim(),
+            system: system || undefined,
+            cache,
+            reasoning_effort: effort || null,
+            key_name: keyName || null,
+            file_root: fileRoot.trim() || null,
+            tools,
+            provider: provider ?? undefined,
+          };
       onsaved(m);
       onclose();
     } catch (e) {

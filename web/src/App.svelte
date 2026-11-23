@@ -38,7 +38,11 @@
     return new Map([...m].sort(([a], [b]) => a.localeCompare(b)));
   });
   const ungrouped = $derived(convs.filter((c) => !c.group));
+  /** Open chat; a draft (id "") lives only here until its first message. */
   let current = $state<Meta | null>(null);
+  const isDraft = $derived(current?.id === '');
+  /** Group a draft will be created in. */
+  let draftGroup = $state<string | null>(null);
   let messages = $state<Message[]>([]);
   let leaf = $state<string | null>(null);
   let streaming = $state<Message | null>(null);
@@ -113,12 +117,32 @@
     await scrollDown();
   }
 
+  /** Shows a draft chat; nothing is saved until the first message. */
   async function newChat() {
-    const group = viewGroup;
-    const m = await api.createConversation();
-    if (group) await api.patchConversation(m.id, { group });
+    error = '';
+    const d = await api.draftConversation();
+    draftGroup = viewGroup;
+    current = d;
+    viewGroup = null;
+    showSettings = false;
+    showSidebar = false;
+    messages = [];
+    leaf = null;
+    if (location.hash) history.pushState(null, '', location.pathname + location.search);
+  }
+
+  /** Saves the draft (or a fresh chat in the shown group) as a real chat. */
+  async function materialize() {
+    const d = current ?? (await api.draftConversation());
+    const group = current ? draftGroup : viewGroup;
+    const m = await api.createConversation({ ...api.draftPatch(d), group });
+    current = m;
+    viewGroup = null;
+    draftGroup = null;
+    messages = [];
+    leaf = null;
+    location.hash = m.id;
     await refreshList();
-    await open(m.id);
   }
 
   let renaming = $state<string | null>(null);
@@ -238,7 +262,14 @@
       error = 'A batch reply is pending: ⟳ to fetch it, ✕ to forget it.';
       return;
     }
-    if (!current) await newChat();
+    if (!current || isDraft) {
+      try {
+        await materialize();
+      } catch (e) {
+        error = String(e);
+        return;
+      }
+    }
     const prevText = input;
     const prevAtts = attachments;
     input = '';
@@ -493,6 +524,8 @@
         if (viewGroup !== g || current) openGroup(g);
       } else if (h && current?.id !== h) {
         await open(h);
+      } else if (!h && !isDraft) {
+        await newChat();
       }
     } catch (e) {
       error = String(e);

@@ -125,8 +125,31 @@ export async function deleteGroup(name: string, withChats: boolean): Promise<voi
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
 }
 
-export const createConversation = () =>
-  fetch('api/conversations', { method: 'POST' }).then((r) => json<Meta>(r));
+/** Settings a new chat would start with (id ""); nothing is saved. */
+export const draftConversation = () => fetch('api/conversations/new').then((r) => json<Meta>(r));
+
+/** Creates a chat with the given settings over the defaults. */
+export const createConversation = (patch: MetaPatch = {}) =>
+  fetch('api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }).then((r) => json<Meta>(r));
+
+/** The fields of a draft that a create call takes. */
+export function draftPatch(d: Meta): MetaPatch {
+  return {
+    title: d.title,
+    model: d.model,
+    provider: d.provider ?? null,
+    system: d.system ?? '',
+    cache: d.cache,
+    reasoning_effort: d.reasoning_effort ?? null,
+    key_name: d.key_name ?? null,
+    file_root: d.file_root ?? '',
+    tools: d.tools ?? false,
+  };
+}
 
 export const getConversation = (id: string) =>
   fetch(`api/conversations/${id}`).then((r) => json<Conversation>(r));

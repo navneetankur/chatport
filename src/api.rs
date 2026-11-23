@@ -59,6 +59,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/file", get(file))
         .route("/api/ls", get(ls))
         .route("/api/conversations", get(list).post(create))
+        .route("/api/conversations/new", get(template))
         .route(
             "/api/groups/{name}",
             axum::routing::patch(rename_group).delete(delete_group),
@@ -186,32 +187,23 @@ async fn delete_group(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Deserialize, Default)]
-struct CreateReq {
-    title: Option<String>,
-    model: Option<String>,
-    provider: Option<Value>,
-    system: Option<String>,
-    cache: Option<CachePolicy>,
-}
-
-async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
-    let r = body.map(|b| b.0).unwrap_or_default();
+/// Settings a new chat starts with: last picked model, config defaults.
+fn new_meta(s: &AppState, id: String) -> Meta {
     let now = now_ms();
-    let meta = Meta {
-        id: new_id(),
-        title: r.title.unwrap_or_else(|| DEFAULT_TITLE.into()),
+    return Meta {
+        id,
+        title: DEFAULT_TITLE.into(),
         created_at: now,
         updated_at: now,
-        model: r
-            .model
-            .or_else(|| s.recent.latest())
+        model: s
+            .recent
+            .latest()
             .unwrap_or_else(|| s.config.default_model.clone()),
         provider: Some(with_data_collection_default(
-            r.provider.or_else(|| s.config.default_provider.clone()),
+            s.config.default_provider.clone(),
         )),
-        system: r.system,
-        cache: r.cache.unwrap_or_default(),
+        system: None,
+        cache: CachePolicy::default(),
         reasoning_effort: None,
         key_name: None,
         file_root: s.config.default_file_root.clone(),
@@ -219,8 +211,24 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         leaf: None,
         pending_batch: None,
     };
+}
+
+/// Meta for a draft chat (id ""), not saved. The UI keeps it until the
+/// first message, then creates the chat with it.
+async fn template(State(s): St) -> Json<Meta> {
+    Json(new_meta(&s, String::new()))
+}
+
+/// Body fields as in PATCH, applied over the defaults.
+async fn create(State(s): St, body: Option<Json<PatchReq>>) -> R<Json<Meta>> {
+    let r = body.map(|b| b.0).unwrap_or_default();
+    let mut meta = new_meta(&s, new_id());
+    let group = apply_patch(&s, &mut meta, r)?;
     s.store.put_meta(&meta)?;
-    Ok(Json(meta))
+    if let Some(g) = group {
+        s.store.move_to(&meta.id, Some(&g))?;
+    }
+    return Ok(Json(meta));
 }
 
 /// New conversations opt out of providers that log/train on prompts, unless
@@ -281,7 +289,7 @@ async fn get_conv(State(s): St, Path(id): Path<String>) -> R<Json<ConvResp>> {
 }
 
 /// Absent field = unchanged. `provider: null` / `system: ""` clear.
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct PatchReq {
     title: Option<String>,
     model: Option<String>,
@@ -317,12 +325,26 @@ async fn patch_conv(
     Json(r): Json<PatchReq>,
 ) -> R<Json<Meta>> {
     let mut meta = load_meta(&s, &id)?;
-    if let Some(g) = &r.group {
-        let g = g.as_deref().map(str::trim).filter(|g| !g.is_empty());
-        if let Some(g) = g {
-            store::check_group(g).map_err(|e| bad(&format!("{e:#}")))?;
-        }
-        s.store.move_to(&id, g)?;
+    let moving = r.group.is_some();
+    let group = apply_patch(&s, &mut meta, r)?;
+    if moving {
+        s.store.move_to(&id, group.as_deref())?;
+    }
+    meta.updated_at = now_ms();
+    s.store.put_meta(&meta)?;
+    Ok(Json(meta))
+}
+
+/// Applies everything but the group to `meta`, validating first.
+/// Returns the checked group name (None = ungrouped or not given).
+fn apply_patch(s: &AppState, meta: &mut Meta, r: PatchReq) -> R<Option<String>> {
+    let group = r
+        .group
+        .flatten()
+        .map(|g| g.trim().to_string())
+        .filter(|g| !g.is_empty());
+    if let Some(g) = &group {
+        store::check_group(g).map_err(|e| bad(&format!("{e:#}")))?;
     }
     if let Some(t) = r.title {
         meta.title = t;
@@ -357,9 +379,7 @@ async fn patch_conv(
     if let Some(t) = r.tools {
         meta.tools = t;
     }
-    meta.updated_at = now_ms();
-    s.store.put_meta(&meta)?;
-    Ok(Json(meta))
+    return Ok(group);
 }
 
 async fn delete_conv(State(s): St, Path(id): Path<String>) -> R<StatusCode> {
