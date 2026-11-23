@@ -26,7 +26,7 @@
 - multi-request body/parse: `build_multi_batch_body`, `parse_batch_all`
   (`BatchState`); single-request versions are built on them.
 - llmjob jobs share the poller under keys `llmjob:<short>`: scheduled by the
-  startup scan (every unfetched job in `data_dir/llmjob/jobs/`, checked at
+  startup scan (every job in `data_dir/llmjob/jobs/pending/`, checked at
   once) or by `POST api/llmjob/rescan` (`llmjob notify`: adds unscheduled
   jobs only, gap by age, so repeats cause no burst). Same gaps, by job age. Each
   check is `llmjob::jobs::poll_once` (shared `check()`: cache atomically, delete

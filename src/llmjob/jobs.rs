@@ -1,8 +1,13 @@
 //! `llmjob batch` / `get` / `ls` / `rm`: OpenRouter batches with one request
 //! per input file.
 //!
-//! data_dir/llmjob/jobs/<short>.json          job record (batch id, names, status)
-//! data_dir/llmjob/jobs/<short>.results.json  raw final batch, once finished
+//! data_dir/llmjob/jobs/pending/<short>.json       submitted, not fetched yet
+//! data_dir/llmjob/jobs/done/<short>.json          fetched (record moved here)
+//! data_dir/llmjob/jobs/done/<short>.results.json  raw final batch
+//!
+//! Listing in-progress jobs = listing `pending/`; fetched ones are never read
+//! for it. "Fetched" = the results file exists (written before the record
+//! moves, so a crash in between is repaired on the next listing).
 //!
 //! Once the final batch is cached locally the upstream copy is deleted, so
 //! `get` can be repeated offline.
@@ -42,53 +47,134 @@ pub struct Job {
 }
 
 pub struct Jobs {
-    dir: PathBuf,
+    pending: PathBuf,
+    done: PathBuf,
+}
+
+/// Job ids (file stems) in `dir`: `<short>.json`, skipping results and tmp files.
+fn stems(dir: &Path) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+        let name = e?.file_name();
+        if let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".json"))
+            && !stem.contains('.')
+        {
+            out.push(stem.to_string());
+        }
+    }
+    return Ok(out);
+}
+
+fn ignore_not_found(r: std::io::Result<()>) -> Result<()> {
+    match r {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
 }
 
 impl Jobs {
     pub fn open(data_dir: &Path) -> Result<Self> {
-        let dir = data_dir.join("llmjob").join("jobs");
-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        return Ok(Self { dir });
+        let root = data_dir.join("llmjob").join("jobs");
+        let (pending, done) = (root.join("pending"), root.join("done"));
+        for d in [&pending, &done] {
+            std::fs::create_dir_all(d).with_context(|| format!("creating {}", d.display()))?;
+        }
+        return Ok(Self { pending, done });
     }
 
+    fn pending_rec(&self, short: &str) -> PathBuf {
+        self.pending.join(format!("{short}.json"))
+    }
+
+    fn done_rec(&self, short: &str) -> PathBuf {
+        self.done.join(format!("{short}.json"))
+    }
+
+    /// Where the record of `short` lives now.
     fn record(&self, short: &str) -> PathBuf {
-        self.dir.join(format!("{short}.json"))
+        let d = self.done_rec(short);
+        if d.exists() {
+            d
+        } else {
+            self.pending_rec(short)
+        }
     }
 
     fn results(&self, short: &str) -> PathBuf {
-        self.dir.join(format!("{short}.results.json"))
+        self.done.join(format!("{short}.results.json"))
     }
 
     pub fn put(&self, job: &Job) -> Result<()> {
-        let tmp = self.dir.join(format!("{}.json.tmp", job.short));
+        let target = self.record(&job.short);
+        let tmp = target.with_extension(format!("json.tmp{}", std::process::id()));
         std::fs::write(&tmp, serde_json::to_vec_pretty(job)?)?;
-        std::fs::rename(&tmp, self.record(&job.short))?;
+        std::fs::rename(&tmp, target)?;
         return Ok(());
     }
 
+    /// Marks a job fetched: results written atomically, then the record moved
+    /// to done/. Safe when the CLI and the server both do it.
+    fn finish(&self, short: &str, v: &Value) -> Result<()> {
+        let results = self.results(short);
+        let tmp = results.with_extension(format!("tmp{}", std::process::id()));
+        std::fs::write(&tmp, serde_json::to_vec(v)?)?;
+        std::fs::rename(&tmp, &results)?;
+        return ignore_not_found(std::fs::rename(
+            self.pending_rec(short),
+            self.done_rec(short),
+        ));
+    }
+
+    /// Every job, oldest first.
     pub fn all(&self) -> Result<Vec<Job>> {
-        let mut out = Vec::new();
-        for e in std::fs::read_dir(&self.dir)? {
-            let name = e?.file_name();
-            let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+        let mut ids = stems(&self.done)?;
+        ids.extend(
+            stems(&self.pending)?
+                .into_iter()
+                .filter(|s| !self.done_rec(s).exists()),
+        );
+        return Ok(self.load_all(ids));
+    }
+
+    /// Jobs not fetched yet, oldest first. Reads only `pending/`.
+    pub fn pending(&self) -> Result<Vec<Job>> {
+        let mut ids = Vec::new();
+        for s in stems(&self.pending)? {
+            if self.results(&s).exists() {
+                // Fetched, but the move to done/ didn't happen (crash): finish it.
+                if let Err(e) = std::fs::rename(self.pending_rec(&s), self.done_rec(&s)) {
+                    log::warn!("moving job {s} to done: {e}");
+                }
                 continue;
-            };
-            if stem.contains('.') {
-                continue; // results / tmp
             }
-            match self.load(stem) {
+            ids.push(s);
+        }
+        return Ok(self.load_all(ids));
+    }
+
+    fn load_all(&self, ids: Vec<String>) -> Vec<Job> {
+        let mut out = Vec::new();
+        for s in ids {
+            match self.load(&s) {
                 Ok(j) => out.push(j),
-                Err(e) => log::warn!("skipping job {stem}: {e:#}"),
+                Err(e) => log::warn!("skipping job {s}: {e:#}"),
             }
         }
         out.sort_by_key(|j| j.created_at);
-        return Ok(out);
+        return out;
     }
 
     fn load(&self, short: &str) -> Result<Job> {
         let b = std::fs::read(self.record(short))?;
         return Ok(serde_json::from_slice(&b)?);
+    }
+
+    /// Removes a job's record and results.
+    fn remove(&self, short: &str) -> Result<()> {
+        ignore_not_found(std::fs::remove_file(self.results(short)))?;
+        ignore_not_found(std::fs::remove_file(self.done_rec(short)))?;
+        ignore_not_found(std::fs::remove_file(self.pending_rec(short)))?;
+        return Ok(());
     }
 
     /// By unique prefix, or `last` = newest.
@@ -120,7 +206,7 @@ impl Jobs {
                         c
                     })
                     .collect();
-                if !self.record(&s).exists() {
+                if !self.pending_rec(&s).exists() && !self.done_rec(&s).exists() {
                     return s;
                 }
             }
@@ -192,10 +278,7 @@ async fn check(
                 (info.status, progress)
             }
             _ => {
-                // Atomic: the server and the CLI may both be at it.
-                let tmp = cached.with_extension(format!("tmp{}", std::process::id()));
-                std::fs::write(&tmp, serde_json::to_vec(&v)?)?;
-                std::fs::rename(&tmp, &cached)?;
+                jobs.finish(&job.short, &v)?;
                 // Results are kept locally now; free the upstream copy.
                 if let Err(e) = provider.delete_batch(&key, &job.batch_id).await {
                     log::warn!("deleting batch {} upstream: {e:#}", job.batch_id);
@@ -251,9 +334,8 @@ fn gone_msg(job: &Job) -> String {
 pub(crate) fn unfetched(data_dir: &Path) -> Result<Vec<(String, u64)>> {
     let jobs = Jobs::open(data_dir)?;
     return Ok(jobs
-        .all()?
+        .pending()?
         .into_iter()
-        .filter(|j| !jobs.results(&j.short).exists())
         .map(|j| (j.short, j.created_at))
         .collect());
 }
@@ -297,10 +379,7 @@ pub(crate) async fn poll_once(
 pub async fn get_all(ctx: &Ctx) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
     let (mut fetched, mut running, mut failed) = (0, 0, 0);
-    for mut job in jobs.all()? {
-        if jobs.results(&job.short).exists() {
-            continue;
-        }
+    for mut job in jobs.pending()? {
         match check(&ctx.config, &ctx.provider, &jobs, &mut job).await {
             Ok(Check::Done(v)) => {
                 let state = match parse_batch_all(&v) {
@@ -510,12 +589,7 @@ async fn rm_one(ctx: &Ctx, jobs: &Jobs, job: &Job, force: bool) -> Result<Remove
             },
         }
     }
-    if let Err(e) = std::fs::remove_file(&cached)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        return Err(e.into());
-    }
-    std::fs::remove_file(jobs.record(&job.short))?;
+    jobs.remove(&job.short)?;
     return Ok(Removed::Yes);
 }
 
@@ -543,7 +617,22 @@ mod tests {
         };
         jobs.put(&job("abc", 2)).unwrap();
         jobs.put(&job("abd", 1)).unwrap();
-        std::fs::write(jobs.results("abc"), "{}").unwrap();
+        assert_eq!(jobs.pending().unwrap().len(), 2);
+        jobs.finish("abc", &serde_json::json!({})).unwrap();
+        assert!(jobs.done_rec("abc").exists() && !jobs.pending_rec("abc").exists());
+        let pending: Vec<String> = jobs
+            .pending()
+            .unwrap()
+            .into_iter()
+            .map(|j| j.short)
+            .collect();
+        assert_eq!(pending, ["abd"]);
+        // Second finish (CLI and server both fetched): fine.
+        jobs.finish("abc", &serde_json::json!({})).unwrap();
+        // Crash between results and move: repaired by the next listing.
+        std::fs::write(jobs.results("abd"), "{}").unwrap();
+        assert!(jobs.pending().unwrap().is_empty());
+        assert!(jobs.done_rec("abd").exists());
         assert_eq!(jobs.all().unwrap().len(), 2);
         assert_eq!(jobs.find("abc").unwrap().batch_id, "b-abc");
         assert_eq!(jobs.find("last").unwrap().short, "abc");

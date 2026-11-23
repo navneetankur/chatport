@@ -20,11 +20,14 @@
   `--save` with `-c` on a scratch chat keeps it. Batch models refused.
 - `batch [--dir DIR]`: one request per regular non-hidden file (sorted), or one
   without `--dir` (named `output`). `:batch` appended to the model if missing.
-  Prints a 3-char job id. Record `data_dir/llmjob/jobs/<id>.json`; custom_id sent
+  Prints a 3-char job id. Record `data_dir/llmjob/jobs/pending/<id>.json`; custom_id sent
   is `r<i>` (Anthropic allows only `[A-Za-z0-9_-]`), file names stay in the record.
 - `get ID|last [--dir OUT] [--wait]`: exit 2 + status on stderr while running
   (`--wait` polls every 60 s). Finished: raw batch cached as
-  `jobs/<id>.results.json`, upstream deleted, so `get` repeats offline. Without
+  `jobs/done/<id>.results.json`, then the record moves `pending/` → `done/`
+  (results first, so a crash in between is repaired on the next listing);
+  upstream deleted, so `get` repeats offline. In-progress jobs = list
+  `pending/`, fetched ones are never read for it. Without
   `--dir` only one-request jobs (stdout); with it `OUT/<name>`, errors in
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
 - `get --all`: checks every unfetched job once, caches finished ones (no
