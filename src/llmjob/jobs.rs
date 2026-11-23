@@ -324,17 +324,74 @@ pub fn ls(ctx: &Ctx) -> Result<i32> {
     return Ok(0);
 }
 
-/// `llmjob rm`: deletes upstream (unless already gone) and the local record.
-pub async fn rm(ctx: &Ctx, q: &str) -> Result<i32> {
+/// What `rm` did with one job.
+#[derive(Debug, PartialEq)]
+enum Removed {
+    Yes,
+    Running,
+    Unfetched,
+}
+
+/// `llmjob rm`: the named jobs, or all. Running batches are skipped (no
+/// cancel exists); finished-but-unfetched ones only with `force`. Exit 1 if
+/// anything was skipped.
+pub async fn rm(ctx: &Ctx, qs: &[String], all: bool, force: bool) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
-    let job = jobs.find(q)?;
+    // Resolve every id first, so a typo removes nothing.
+    let targets = if all {
+        jobs.all()?
+    } else {
+        qs.iter()
+            .map(|q| jobs.find(q))
+            .collect::<Result<Vec<_>>>()?
+    };
+    let (mut removed, mut running, mut unfetched, mut failed) = (0, 0, 0, 0);
+    for job in &targets {
+        match rm_one(ctx, &jobs, job, force).await {
+            Ok(Removed::Yes) => removed += 1,
+            Ok(Removed::Running) => {
+                eprintln!("{}: still running, skipped (can't cancel)", job.short);
+                running += 1;
+            }
+            Ok(Removed::Unfetched) => {
+                eprintln!(
+                    "{}: finished but not fetched, skipped (`get` it, or --force)",
+                    job.short
+                );
+                unfetched += 1;
+            }
+            Err(e) => {
+                eprintln!("{}: {e:#}", job.short);
+                failed += 1;
+            }
+        }
+    }
+    eprintln!(
+        "removed {removed}, skipped {running} running, {unfetched} unfetched, {failed} failed"
+    );
+    return Ok(if running + unfetched + failed > 0 {
+        1
+    } else {
+        0
+    });
+}
+
+async fn rm_one(ctx: &Ctx, jobs: &Jobs, job: &Job, force: bool) -> Result<Removed> {
     let cached = jobs.results(&job.short);
     if !cached.exists() {
         let key = ctx.config.key_for(job.key_name.as_deref())?;
-        ctx.provider
-            .delete_batch(key, &job.batch_id)
-            .await
-            .context("deleting upstream (a running batch can't be cancelled or deleted)")?;
+        match ctx.provider.batch_raw(key, &job.batch_id).await? {
+            None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
+                return Ok(Removed::Running);
+            }
+            // Gone upstream: nothing left to lose.
+            None => {}
+            Some(v) => match parse_batch_all(&v) {
+                BatchState::Pending(_) => return Ok(Removed::Running),
+                _ if !force => return Ok(Removed::Unfetched),
+                _ => ctx.provider.delete_batch(key, &job.batch_id).await?,
+            },
+        }
     }
     if let Err(e) = std::fs::remove_file(&cached)
         && e.kind() != std::io::ErrorKind::NotFound
@@ -342,8 +399,7 @@ pub async fn rm(ctx: &Ctx, q: &str) -> Result<i32> {
         return Err(e.into());
     }
     std::fs::remove_file(jobs.record(&job.short))?;
-    eprintln!("removed {}", job.short);
-    return Ok(0);
+    return Ok(Removed::Yes);
 }
 
 /// Name of the request when there is no input dir.

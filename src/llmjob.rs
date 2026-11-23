@@ -38,7 +38,7 @@ usage:
                                                            prints a job id
   llmjob get   ID|last [--dir DIR] [--wait]                exit 2 while running
   llmjob ls
-  llmjob rm    ID|last
+  llmjob rm    ID|last...  |  --all [--force]          delete jobs (local + upstream)
 
 options:
   -s, --system FILE   system prompt file (repeatable)
@@ -51,6 +51,8 @@ options:
   -c, --continue ID   run: continue conversation ID (prefix/suffix) or `last`
       --dir DIR       batch: one request per file in DIR; get: write outputs there
       --wait          get: poll every minute until finished
+      --all           rm: every job (running ones are always skipped)
+      --force         rm: also jobs finished upstream but never fetched
       --config PATH   default ~/.config/chatport/config.toml
       --keyfile PATH  key for the default key name (else OPENROUTER_API_KEY, config)
 
@@ -85,6 +87,8 @@ struct Args {
     cont: Option<String>,
     dir: Option<PathBuf>,
     wait: bool,
+    all: bool,
+    force: bool,
 }
 
 /// Options that take a value (needed to find the command among leading options).
@@ -149,6 +153,8 @@ fn parse_args(argv: Vec<String>) -> Result<Option<Args>> {
         cont: None,
         dir: None,
         wait: false,
+        all: false,
+        force: false,
     };
     let mut flags_done = false;
     while let Some(arg) = it.next() {
@@ -175,6 +181,8 @@ fn parse_args(argv: Vec<String>) -> Result<Option<Args>> {
             "-c" | "--continue" => a.cont = Some(val()?),
             "--dir" => a.dir = Some(PathBuf::from(val()?)),
             "--wait" => a.wait = true,
+            "--all" => a.all = true,
+            "--force" => a.force = true,
             "--config" => a.config = Some(PathBuf::from(val()?)),
             "--keyfile" => a.keyfile = Some(config::expand_tilde(&val()?)),
             "--key" => bail!("--key is not supported (visible in ps); use --keyfile PATH"),
@@ -191,6 +199,9 @@ fn check_args(a: &Args) -> Result<()> {
     let prompt = !a.system.is_empty() || !a.msg.is_empty() || a.headers;
     let model = a.profile.is_some() || a.model.is_some() || a.effort.is_some();
     let bad = |what: &str| bail!("{what} does not apply to `{:?}`", a.cmd);
+    if a.cmd != Cmd::Rm && (a.all || a.force) {
+        return bad("--all/--force");
+    }
     match a.cmd {
         Cmd::Run => {
             if a.dir.is_some() || a.wait {
@@ -205,15 +216,22 @@ fn check_args(a: &Args) -> Result<()> {
                 return bad("--save/-c/--wait");
             }
         }
-        Cmd::Get | Cmd::Rm => {
+        Cmd::Get => {
             if prompt || model || a.save || a.cont.is_some() {
                 return bad("prompt/model options");
             }
-            if a.cmd == Cmd::Rm && (a.dir.is_some() || a.wait) {
-                return bad("--dir/--wait");
-            }
             if a.words.len() != 1 {
                 bail!("expected one job id (or `last`)");
+            }
+        }
+        Cmd::Rm => {
+            if prompt || model || a.save || a.cont.is_some() || a.dir.is_some() || a.wait {
+                return bad("options");
+            }
+            match (a.all, a.words.is_empty()) {
+                (true, false) => bail!("--all takes no job ids"),
+                (false, true) => bail!("expected job ids (or --all)"),
+                _ => {}
             }
         }
         Cmd::Keep | Cmd::Ls => {
@@ -293,7 +311,7 @@ async fn dispatch(a: Args) -> Result<i32> {
         Cmd::Batch => batch(&ctx, &a, &profile).await,
         Cmd::Get => jobs::get(&ctx, &a.words[0], a.dir.as_deref(), a.wait).await,
         Cmd::Ls => jobs::ls(&ctx),
-        Cmd::Rm => jobs::rm(&ctx, &a.words[0]).await,
+        Cmd::Rm => jobs::rm(&ctx, &a.words, a.all, a.force).await,
     };
 }
 

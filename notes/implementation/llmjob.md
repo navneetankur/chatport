@@ -27,7 +27,11 @@
   `jobs/<id>.results.json`, upstream deleted, so `get` repeats offline. Without
   `--dir` only one-request jobs (stdout); with it `OUT/<name>`, errors in
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
-- `ls` local jobs; `rm` deletes upstream (refused while running: no cancel) + local.
+- `ls` local jobs. `rm ID…` / `rm --all`: all ids resolved first (a typo
+  removes nothing). Fetched → local files removed. Not fetched: running is
+  always skipped (no cancel); finished upstream is skipped unless `--force`
+  (then deleted upstream); gone upstream → local removed. Summary on stderr,
+  exit 1 if anything was skipped or failed.
 - live-tested 2026-11-23 with `openrouter/free`: run, `-c last`, `-m -`, keep,
   `--save`, `-c <suffix> --effort low`. Batch (Haiku 5.5): 2-file `--dir`
   job → `out/a.txt`, `out/b.txt` with `--headers` profile, $0.000068; 1-request

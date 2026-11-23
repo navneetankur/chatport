@@ -48,8 +48,20 @@ fn help_and_errors() {
     assert!(parse("get a b").is_err());
     assert!(parse("get abc -m x").is_err());
     assert!(parse("rm abc --wait").is_err());
+    assert!(parse("rm").is_err());
+    assert!(parse("rm --all abc").is_err());
+    assert!(parse("get abc --all").is_err());
+    assert!(parse("run --force").is_err());
     assert!(parse("ls extra").is_err());
     assert!(parse("keep --save").is_err());
+}
+
+#[test]
+fn rm_args() {
+    let a = parse("rm k3f 52p").unwrap().unwrap();
+    assert_eq!((a.cmd, a.words.len(), a.all), (Cmd::Rm, 2, false));
+    let a = parse("rm --all --force").unwrap().unwrap();
+    assert!(a.all && a.force && a.words.is_empty());
 }
 
 #[test]
