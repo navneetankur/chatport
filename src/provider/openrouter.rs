@@ -442,7 +442,18 @@ impl Provider for OpenRouter {
             let mut buf: Vec<u8> = Vec::new();
             let mut last_model: Option<String> = None;
             let mut last_provider: Option<String> = None;
-            while let Some(chunk) = bytes.next().await {
+            loop {
+                // Stop as soon as the receiver is dropped (user pressed Stop), even
+                // while nothing is streaming (e.g. hidden reasoning): dropping `resp`
+                // closes the connection, which is what cancels upstream billing.
+                let chunk = tokio::select! {
+                    c = bytes.next() => c,
+                    _ = tx.closed() => {
+                        log::debug!("receiver dropped; aborting upstream stream");
+                        return;
+                    }
+                };
+                let Some(chunk) = chunk else { break };
                 let chunk = match chunk {
                     Ok(c) => c,
                     Err(e) => {
