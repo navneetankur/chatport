@@ -81,6 +81,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 
 ## Deferred (not needed)
 - Auto-title after first reply.
+- Own `fetch_url` function tool (HTTP GET + a Readability port, e.g. `dom_smoothie`): only if Exa fetch gets ~10x pricier than $1/1k pages, or LAN/private URLs are needed.
 - [ ] Guard against two concurrent generations in one conversation (currently allowed; both save fine, last one wins leaf).
 - Won't do (by choice): `store` uses blocking std fs from async handlers. Ops are tiny (small meta.json, one-line appends), single user — accepted practice. `tokio::fs` is just spawn_blocking per call, gains nothing. If it ever matters: keep `Store` sync, wrap handler calls in `tokio::task::spawn_blocking` (std Mutex stays fine — never held across `.await`).
 
