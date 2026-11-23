@@ -64,6 +64,12 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] View sent attachments: click the 📎 chip → plain text in a new tab (blob URL); `.md` also gets "rendered" (DOMPurify'd HTML page).
 - [x] Chat groups: folder per group (`conversations/<group>/<id>-<label>/`, `_ungrouped` reserved). Old layout was migrated by a one-off script (not in the code). List = folder names + `messages.jsonl` mtime (no meta.json reads). Groups exist only while they have chats (created by "move to group", removed when empty). Sidebar: collapsible groups (state in localStorage, closed by default), group view at `#g/<name>` (new chat from there joins the group), ⇄ move, rename group, delete group (ungroup chats / delete all).
 - [ ] Chat groups: not yet clicked through in a browser (API live-tested via curl).
+- [x] Sidebar rows are real `<a href="#id">` / `#g/<name>` links (middle-click, open in new tab); `route()` on hashchange drives navigation.
+- [x] Draft new chat: "+ New chat" and the landing page (empty hash) show a draft (`id ""`, from `GET /api/conversations/new`) kept only in the browser. Settings/header edits change it locally; first send does `POST /api/conversations` with `draftPatch` + group (create takes PATCH fields). No more empty "New chat" folders.
+- [x] Recent models: `<data_dir>/state.json` (`src/recent.rs`, `MAX_RECENT = 20`), the *picked* id (e.g. `openrouter/free`), recorded on send/regenerate. New chats default to the newest (config `default_model` only when empty). `GET /api/recent-models`; ModelPicker shows "Recent" then "All models" until you type.
+- [x] Header: double-click title to rename; click model (▾) for an inline ModelPicker that applies on pick.
+- [x] Settings: Save/Cancel row is sticky at the panel bottom.
+- [ ] Draft chat / recent models / header editing: not yet clicked through in a browser (API live-tested via curl).
 - [ ] Nice-to-have: per-group system prompt addendum (`<group>/group.json`).
 - [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.
 - [x] User messages render markdown too (shared `content` snippet in App.svelte, same `</>` raw toggle as replies).
