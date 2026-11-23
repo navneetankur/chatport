@@ -5,3 +5,4 @@
 config.toml
 /key.txt
 /bigfiles
+/tools/install.sh
