@@ -35,7 +35,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - File tools: `src/tools.rs` (specs, `jail`, run → `ToolResult {output, error, diff}`). `generate` loops rounds (max 20) while the model returns tool calls; one assistant msg holds `tool_rounds`. SSE `tool_round {content, calls, results}` (client moves streamed content into the round), `usage` is the running total. `api::context` builds provider messages (expanded / folded). UI: 🔧 collapsible per call with coloured diff; settings checkbox "File tools" (disabled without file root). Tested with `google/gemini-3.8-flash`.
 - Web tools: `meta.web_tools` → `ChatRequest.web_tools` → `openrouter::web_tools()` appended to `tools` (after function tools). Engines/limits are consts there, not config. `generate` drops them (message `warning`) when `/models` lists the model without `tools` (`ModelInfo.tools` from `supported_parameters`); unknown ids keep them. `Usage.web_searches` from `server_tool_use_details`; ⓘ shows "Web searches". Settings checkbox "Web tools" (disabled for known no-tools models). Batch never sends them.
 - Raw view: `openrouter::is_plain_text` (delta only role/content/reasoning/reasoning_details/tool_calls, no finish_reason, no usage) — every other chunk → `ChatEvent::Raw` → SSE `raw` (all rounds). Never stored: `run()` collects them, `lastRaw {id, chunks}` set on `done`, reset at next run; `{}` button on that message only, gone on reload.
-- `bigfiles/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
+- `untracked/` (gitignored) holds raw captures, e.g. `openrouter-stream-free.sse` — read these instead of making new live calls.
 - Groups: `Store::{move_to, rename_group, delete_group}`; `PATCH /conversations/:id {group}` (null/"" = ungroup), `PATCH /api/groups/:name {name}`, `DELETE /api/groups/:name?chats=true|false`. `GET /conversations` returns `Summary {id, group, title (=folder label), updated_at (mtime)}`, not Meta.
 - Client builds tree from `GET /api/conversations/:id` → `{meta, leaf, messages}`; siblings = same `parent_id`, order = array order.
 
@@ -116,8 +116,8 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-21: Record actual model. Live: `openrouter/free` → `nvidia/nemotron-3.5-super-vl:free`, requested_model kept. Remaining backlog: Haiku cache-hit check.
 - 2026-11-21: Provider name captured from stream; compact meta row + details toggle. Live: openrouter/free → baidu/ernie-5.5-flash-preview:free via Baidu. Not yet seen in a browser.
 - 2026-11-21: Reasoning text + reasoning token count. Also added the missing provider parse test (last round's test edit silently didn't apply).
-- 2026-11-21: Reasoning effort setting. Live: bad value → 422; `none` on ernie-5.5-flash → OpenRouter 400 (mandatory reasoning), `high` OK. Capture in bigfiles/openrouter-stream-effort-high.sse.
-- 2026-11-21: Cache verified with anthropic/claude-haiku-5.5, ~14.7k-token system prompt: turn 2 cached_tokens=14675/14697, cost $0.00184 → $0.00015. Raw SSE in bigfiles/chatport-haiku-cache-2turns.sse. Added TODO: show effort in header.
+- 2026-11-21: Reasoning effort setting. Live: bad value → 422; `none` on ernie-5.5-flash → OpenRouter 400 (mandatory reasoning), `high` OK. Capture in untracked/openrouter-stream-effort-high.sse.
+- 2026-11-21: Cache verified with anthropic/claude-haiku-5.5, ~14.7k-token system prompt: turn 2 cached_tokens=14675/14697, cost $0.00184 → $0.00015. Raw SSE in untracked/chatport-haiku-cache-2turns.sse. Added TODO: show effort in header.
 - 2026-11-21: Header shows `· <effort> effort` when set.
 - 2026-11-21: Phone layout: ☰ in header opens sidebar as slide-over (<640px), closes on open/new chat/backdrop. Header totals hidden on phone.
 - 2026-11-21: Copy/download/raw toggle + code-block copy (web/src/clipboard.ts). Builds clean; not yet clicked through in a browser.
