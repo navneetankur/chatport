@@ -31,11 +31,12 @@
   outputs written), updates statuses for `ls`. Exit 2 if any still running, 1
   if a check failed. Manual or cron use; see also `notify`.
 - `ls` local jobs (status as of the last check).
-- `notify ID…|--all [--server ADDR]`: asks a running chatport server
-  (`POST api/llmjob/{short}/poll`, Basic auth from config) to auto-fetch the
-  jobs. Address: `--server` (host:port or URL), else config `bind` with
-  0.0.0.0/:: made local. Explicit on purpose (not done by `batch`); no server
-  → error. The server's startup scan also picks up every unfetched job. `rm ID…` / `rm --all`: all ids resolved first (a typo
+- `notify [--server ADDR]`: asks a running chatport server to rescan the jobs
+  folder (`POST api/llmjob/rescan`, Basic auth from config) and auto-fetch every
+  unfetched job. No ids: there is no reason not to watch all. Address:
+  `--server` (host:port or URL), else config `bind` with 0.0.0.0/:: made local.
+  Explicit on purpose (not done by `batch`); no server or auto-poll off →
+  error. The server's startup scan also picks up every unfetched job. `rm ID…` / `rm --all`: all ids resolved first (a typo
   removes nothing). Fetched → local files removed. Not fetched: running is
   always skipped (no cancel); finished upstream is skipped unless `--force`
   (then deleted upstream); gone upstream → local removed. Summary on stderr,

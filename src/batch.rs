@@ -10,8 +10,8 @@
 //! restarts. Every pending batch is checked once at startup.
 //!
 //! llmjob batch jobs (`data_dir/llmjob/jobs/`) share the poller under keys
-//! `llmjob:<short>`: found by the startup scan, or announced by the CLI via
-//! `POST api/llmjob/{short}/poll` right after submit. Same gaps, by job age.
+//! `llmjob:<short>`: found by the startup scan, or by a rescan the CLI asks
+//! for (`llmjob notify` → `POST api/llmjob/rescan`). Same gaps, by job age.
 //! A finished job is cached for `llmjob get`; nothing is written elsewhere.
 //!
 //! The poller sleeps until the earliest due check; `schedule`/`unschedule`
@@ -304,16 +304,27 @@ fn data_dir(s: &AppState) -> std::path::PathBuf {
     crate::config::expand_tilde(&s.config.data_dir)
 }
 
-/// `POST api/llmjob/{short}/poll`: llmjob just submitted this job; schedule it.
-pub async fn job_poll_handler(State(s): St, Path(short): Path<String>) -> R<Json<Value>> {
-    let created = crate::llmjob::jobs::created_at(&data_dir(&s), &short)
-        .map_err(|e| bad(&format!("{e:#}")))?;
-    let gap = next_gap(age_since(created), s.config.batch.poll_interval);
-    schedule(&s, &format!("{JOB_PREFIX}{short}"), gap);
-    log::info!("llmjob {short}: scheduled, first check in {gap:?}");
-    Ok(Json(
-        json!({ "scheduled": !s.config.batch.poll_interval.is_zero() }),
-    ))
+/// `POST api/llmjob/rescan` (`llmjob notify`): schedules every unfetched llmjob
+/// job not scheduled yet, by its age (a fresh one: first check in 5 min).
+/// Already scheduled jobs keep their slot.
+pub async fn job_rescan_handler(State(s): St) -> R<Json<Value>> {
+    let cap = s.config.batch.poll_interval;
+    if cap.is_zero() {
+        return Ok(Json(json!({ "scheduled": 0, "auto_poll": false })));
+    }
+    let jobs = crate::llmjob::jobs::unfetched(&data_dir(&s)).map_err(|e| bad(&format!("{e:#}")))?;
+    let mut added = 0;
+    for (short, created) in jobs {
+        let key = format!("{JOB_PREFIX}{short}");
+        if s.batch_polls.lock().unwrap().contains_key(&key) {
+            continue;
+        }
+        let gap = next_gap(age_since(created), cap);
+        schedule(&s, &key, gap);
+        log::info!("llmjob {short}: scheduled, first check in {gap:?}");
+        added += 1;
+    }
+    Ok(Json(json!({ "scheduled": added, "auto_poll": true })))
 }
 
 /// Starts the background poller unless `[batch] poll_interval` is 0.

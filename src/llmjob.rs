@@ -39,8 +39,8 @@ usage:
   llmjob get   ID|last [--dir DIR] [--wait]                exit 2 while running
   llmjob get   --all                                       cache every finished job
   llmjob ls
-  llmjob notify ID|last...  |  --all [--server ADDR]   have a running chatport server
-                                                           auto-fetch these jobs
+  llmjob notify [--server ADDR]                            have a running chatport server
+                                                           auto-fetch all unfetched jobs
   llmjob rm    ID|last...  |  --all [--force]          delete jobs (local + upstream)
 
 options:
@@ -55,7 +55,6 @@ options:
       --dir DIR       batch: one request per file in DIR; get: write outputs there
       --wait          get: poll every minute until finished
       --all           get: check every unfetched job once, cache finished ones
-                      notify: every unfetched job
                       rm: every job (running ones are always skipped)
       --force         rm: also jobs finished upstream but never fetched
       --server ADDR   notify: host:port or URL (default: config bind, 0.0.0.0 → 127.0.0.1)
@@ -217,7 +216,7 @@ fn check_args(a: &Args) -> Result<()> {
     if a.force && a.cmd != Cmd::Rm {
         return bad("--force");
     }
-    if a.all && !matches!(a.cmd, Cmd::Rm | Cmd::Get | Cmd::Notify) {
+    if a.all && !matches!(a.cmd, Cmd::Rm | Cmd::Get) {
         return bad("--all");
     }
     match a.cmd {
@@ -245,7 +244,7 @@ fn check_args(a: &Args) -> Result<()> {
                 bail!("expected one job id (or `last`)");
             }
         }
-        Cmd::Rm | Cmd::Notify => {
+        Cmd::Rm => {
             if prompt || model || a.save || a.cont.is_some() || a.dir.is_some() || a.wait {
                 return bad("options");
             }
@@ -255,7 +254,7 @@ fn check_args(a: &Args) -> Result<()> {
                 _ => {}
             }
         }
-        Cmd::Keep | Cmd::Ls => {
+        Cmd::Keep | Cmd::Ls | Cmd::Notify => {
             if prompt || model || a.save || a.cont.is_some() || a.dir.is_some() || a.wait {
                 return bad("options");
             }
@@ -337,7 +336,7 @@ async fn dispatch(a: Args) -> Result<i32> {
         Cmd::Get => jobs::get(&ctx, &a.words[0], a.dir.as_deref(), a.wait).await,
         Cmd::Ls => jobs::ls(&ctx),
         Cmd::Rm => jobs::rm(&ctx, &a.words, a.all, a.force).await,
-        Cmd::Notify => jobs::notify(&ctx, &a.words, a.all).await,
+        Cmd::Notify => notify(&ctx).await,
     };
 }
 
@@ -359,14 +358,14 @@ fn server_base(server: Option<&str>, bind: &str) -> String {
     return format!("http://{addr}");
 }
 
-/// Asks a running chatport server to auto-fetch job `short`. Returns the
-/// server's base URL.
-pub(crate) async fn notify_server(ctx: &Ctx, short: &str) -> Result<String> {
+/// `llmjob notify`: asks a running chatport server to rescan the jobs folder
+/// and auto-fetch every unfetched job.
+async fn notify(ctx: &Ctx) -> Result<i32> {
     let base = server_base(ctx.server.as_deref(), &ctx.config.bind);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()?;
-    let mut req = client.post(format!("{base}/api/llmjob/{short}/poll"));
+    let mut req = client.post(format!("{base}/api/llmjob/rescan"));
     if let Some(a) = &ctx.config.auth {
         req = req.basic_auth(&a.user, Some(&a.password));
     }
@@ -381,7 +380,12 @@ pub(crate) async fn notify_server(ctx: &Ctx, short: &str) -> Result<String> {
             r.text().await.unwrap_or_default()
         );
     }
-    return Ok(base);
+    let v: serde_json::Value = r.json().await.unwrap_or_default();
+    if v["auto_poll"] == false {
+        bail!("server at {base} has auto-poll off ([batch] poll_interval)");
+    }
+    eprintln!("server at {base}: {} newly scheduled", v["scheduled"]);
+    return Ok(0);
 }
 
 /// Named profile (must exist), else `default` if configured, else empty.

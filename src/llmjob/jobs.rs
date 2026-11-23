@@ -258,14 +258,6 @@ pub(crate) fn unfetched(data_dir: &Path) -> Result<Vec<(String, u64)>> {
         .collect());
 }
 
-/// created_at of job `short`, for scheduling; Err if there is no such job.
-pub(crate) fn created_at(data_dir: &Path, short: &str) -> Result<u64> {
-    if short.is_empty() || !short.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        bail!("invalid job id");
-    }
-    return Ok(Jobs::open(data_dir)?.load(short)?.created_at);
-}
-
 /// Server poller: one check of job `short`. Some(created_at) = still running,
 /// check again later; None = nothing left to do (fetched, removed or gone).
 pub(crate) async fn poll_once(
@@ -297,37 +289,6 @@ pub(crate) async fn poll_once(
             return Ok(None);
         }
     }
-}
-
-/// `llmjob notify`: asks the server to auto-fetch the named jobs, or every
-/// unfetched one. Exit 1 if any notify failed.
-pub async fn notify(ctx: &Ctx, qs: &[String], all: bool) -> Result<i32> {
-    let jobs = Jobs::open(&ctx.data_dir)?;
-    let shorts: Vec<String> = if all {
-        unfetched(&ctx.data_dir)?
-            .into_iter()
-            .map(|(s, _)| s)
-            .collect()
-    } else {
-        qs.iter()
-            .map(|q| jobs.find(q).map(|j| j.short))
-            .collect::<Result<_>>()?
-    };
-    let mut failed = 0;
-    for short in &shorts {
-        if jobs.results(short).exists() {
-            eprintln!("{short}: already fetched");
-            continue;
-        }
-        match super::notify_server(ctx, short).await {
-            Ok(base) => eprintln!("{short}: server at {base} will fetch it"),
-            Err(e) => {
-                eprintln!("{short}: {e:#}");
-                failed += 1;
-            }
-        }
-    }
-    return Ok(if failed > 0 { 1 } else { 0 });
 }
 
 /// `llmjob get --all`: checks every unfetched job once and caches the

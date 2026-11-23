@@ -78,7 +78,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/conversations/{id}/regenerate", post(regenerate))
         .route("/api/conversations/{id}/leaf", post(set_leaf))
         .route("/api/conversations/{id}/stop", post(stop))
-        .route("/api/llmjob/{short}/poll", post(batch::job_poll_handler))
+        .route("/api/llmjob/rescan", post(batch::job_rescan_handler))
         .route(
             "/api/conversations/{id}/batch/refresh",
             post(batch::refresh_handler),

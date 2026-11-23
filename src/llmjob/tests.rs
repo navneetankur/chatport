@@ -76,11 +76,11 @@ fn server_base_from_flag_or_bind() {
         "http://localhost:4268"
     );
     assert_eq!(server_base(Some("https://h/chat/"), "x"), "https://h/chat");
-    let a = parse("notify --server h:1 k3f").unwrap().unwrap();
+    let a = parse("notify --server h:1").unwrap().unwrap();
     assert_eq!((a.cmd, a.server.as_deref()), (Cmd::Notify, Some("h:1")));
-    assert!(parse("notify --all").unwrap().unwrap().all);
-    assert!(parse("notify").is_err());
-    assert!(parse("notify --all k3f").is_err());
+    assert!(parse("notify").unwrap().is_some());
+    assert!(parse("notify k3f").is_err());
+    assert!(parse("notify --all").is_err());
     assert!(parse("batch --server h:1 q").is_err());
 }
 
