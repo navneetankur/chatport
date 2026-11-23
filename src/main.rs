@@ -1,39 +1,11 @@
 #![allow(clippy::needless_return)] // house style: explicit return in multi-statement fns
 
-mod api;
-mod attachments;
-mod auth;
-mod batch;
-mod config;
-mod files;
-mod listen;
-mod provider;
-mod recent;
-mod store;
-mod tools;
-mod tree;
-mod web;
-
 use anyhow::{Context, Result};
+use chatport::{
+    AppState, api, attachments, auth, batch, config, listen, provider, recent, store, web,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-pub struct AppState {
-    pub store: store::Store,
-    /// Attachment blobs, use log and pins.
-    pub attachments: attachments::Attachments,
-    /// Recently picked models (state.json).
-    pub recent: recent::Recent,
-    pub provider: Arc<dyn provider::Provider>,
-    pub config: config::Config,
-    /// In-flight generations: conv id -> (generation id, cancel sender).
-    pub running: api::Running,
-    /// Next automatic check per conversation with a pending batch.
-    pub batch_polls: batch::Polls,
-    pub batch_lock: batch::Lock,
-    /// Wakes the batch poller when `batch_polls` changes.
-    pub batch_wake: tokio::sync::Notify,
-}
 
 struct Args {
     config: Option<PathBuf>,
@@ -83,17 +55,6 @@ fn parse_args() -> Result<Args> {
     Ok(out)
 }
 
-/// The key from `path`, surrounding whitespace trimmed. Empty is an error.
-fn read_keyfile(path: &std::path::Path) -> Result<String> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading keyfile {}", path.display()))?;
-    let key = text.trim();
-    if key.is_empty() {
-        anyhow::bail!("keyfile {} is empty", path.display());
-    }
-    return Ok(key.to_string());
-}
-
 fn main() -> Result<()> {
     // SAFETY: no threads exist yet; the tokio runtime is built below.
     let act = unsafe { listen::take_activation() };
@@ -114,7 +75,7 @@ async fn run(act: listen::Activation) -> Result<()> {
         return attachments::Attachments::open(&data_dir)?.gc(&store, delete);
     }
     let override_key = match &args.keyfile {
-        Some(p) => Some(read_keyfile(p)?),
+        Some(p) => Some(config::read_keyfile(p)?),
         None => std::env::var("OPENROUTER_API_KEY").ok(),
     };
     cfg.resolve_keys(override_key)?;

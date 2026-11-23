@@ -205,6 +205,17 @@ fn parse(text: &str) -> Result<(Config, Vec<String>)> {
     return Ok((cfg, unknown));
 }
 
+/// The key from `path`, surrounding whitespace trimmed. Empty is an error.
+pub fn read_keyfile(path: &std::path::Path) -> Result<String> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading keyfile {}", path.display()))?;
+    let key = text.trim();
+    if key.is_empty() {
+        anyhow::bail!("keyfile {} is empty", path.display());
+    }
+    return Ok(key.to_string());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
