@@ -119,6 +119,51 @@ fn reattach_keeps_pin_and_pin_is_not_a_use() {
 }
 
 #[test]
+fn find_newest_reads_backwards_across_chunks() {
+    let e = |h: &str, n: &str| Entry {
+        hash: h.into(),
+        name: n.into(),
+        size: 0,
+        at: 0,
+        chat: None,
+        chat_name: None,
+        path: None,
+        pinned: false,
+        hidden: false,
+    };
+    let long = "x".repeat(100);
+    let lines = [
+        e("a", "a1"),
+        e("b", &long),
+        e("a", "a2"),
+        e("c", "c1"),
+        e("d", "d1"),
+    ];
+    let mut text = to_lines(&lines).unwrap();
+    text.extend(b"not json\n\n");
+    let find = |h: &str, chunk: u64| {
+        find_newest(&mut std::io::Cursor::new(&text), h, chunk)
+            .unwrap()
+            .map(|e| e.name)
+    };
+    // Chunk sizes: tiny (lines span many chunks), mid, larger than the file.
+    for chunk in [1, 7, 33, 4096] {
+        assert_eq!(find("a", chunk).as_deref(), Some("a2"), "chunk {chunk}");
+        assert_eq!(
+            find("b", chunk).as_deref(),
+            Some(long.as_str()),
+            "chunk {chunk}"
+        );
+        assert_eq!(find("d", chunk).as_deref(), Some("d1"), "chunk {chunk}");
+        assert_eq!(find("z", chunk), None, "chunk {chunk}");
+    }
+    assert_eq!(
+        find_newest(&mut std::io::Cursor::new(b""), "a", 8).unwrap(),
+        None
+    );
+}
+
+#[test]
 fn compact_keeps_newest_line_per_kept_hash() {
     let e = |h: &str, n: &str| Entry {
         hash: h.into(),

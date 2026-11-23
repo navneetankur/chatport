@@ -94,6 +94,44 @@ fn parse_log(text: &str, path: &Path) -> Vec<Entry> {
         .collect()
 }
 
+/// Bytes read per step by `find_newest`.
+const TAIL_CHUNK: u64 = 4096;
+
+/// Newest line for `hash`, reading backwards `chunk` bytes at a time, so a
+/// recently used file (near the end after compaction) costs one small read.
+/// A line cut by a chunk boundary is carried into the next (earlier) step.
+fn find_newest<F: Read + Seek>(f: &mut F, hash: &str, chunk: u64) -> Result<Option<Entry>> {
+    let mut pos = f.seek(std::io::SeekFrom::End(0))?;
+    let mut carry: Vec<u8> = Vec::new();
+    while pos > 0 {
+        let start = pos.saturating_sub(chunk);
+        let mut buf = vec![0; (pos - start) as usize];
+        f.seek(std::io::SeekFrom::Start(start))?;
+        f.read_exact(&mut buf)?;
+        buf.extend_from_slice(&carry);
+        // Before the first newline may be the tail of a line starting earlier.
+        let cut = match (start, buf.iter().position(|&b| b == b'\n')) {
+            (0, _) => 0,
+            (_, Some(i)) => i + 1,
+            (_, None) => buf.len(),
+        };
+        for line in buf[cut..].split(|&b| b == b'\n').rev() {
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            match serde_json::from_slice::<Entry>(line) {
+                Ok(e) if e.hash == hash => return Ok(Some(e)),
+                Ok(_) => {}
+                Err(e) => log::warn!("attachments log: skipping bad line: {e}"),
+            }
+        }
+        buf.truncate(cut);
+        carry = buf;
+        pos = start;
+    }
+    return Ok(None);
+}
+
 /// Newest line per hash, most recently used first.
 fn latest(lines: &[Entry]) -> Vec<Entry> {
     let mut seen = HashSet::new();
@@ -245,7 +283,13 @@ impl Attachments {
 
     /// Newest line for `hash`, if any.
     fn newest(&self, hash: &str) -> Result<Option<Entry>> {
-        Ok(self.lines()?.into_iter().rev().find(|e| e.hash == hash))
+        let mut f = match std::fs::File::open(&self.log) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).with_context(|| format!("opening {}", self.log.display())),
+        };
+        return find_newest(&mut f, hash, TAIL_CHUNK)
+            .with_context(|| format!("reading {}", self.log.display()));
     }
 
     pub fn picker(&self) -> Result<Picker> {
