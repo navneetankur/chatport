@@ -157,6 +157,9 @@ pub enum ChatEvent {
         name: Option<String>,
         arguments: String,
     },
+    /// A raw chunk that is not plain text streaming (usage, annotations,
+    /// finish_reason, …), verbatim, for the debug view.
+    Raw(Value),
     Done,
 }
 

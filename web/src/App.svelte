@@ -48,6 +48,9 @@
   let messages = $state<Message[]>([]);
   let leaf = $state<string | null>(null);
   let streaming = $state<Message | null>(null);
+  /** Raw provider chunks of the last reply streamed here; memory only, so gone on reload or next send. */
+  let lastRaw = $state<{ id: string; chunks: unknown[] } | null>(null);
+  let showRaw = $state(false);
   let input = $state('');
   let busy = $state(false);
   let error = $state('');
@@ -435,6 +438,9 @@
     busy = true;
     error = '';
     let ok = true;
+    const raw: unknown[] = [];
+    lastRaw = null;
+    showRaw = false;
     try {
       await start(conv, (e) => {
         if (current?.id !== conv.id) return;
@@ -462,6 +468,9 @@
               streaming.content = '';
             }
             break;
+          case 'raw':
+            raw.push(e.data);
+            return;
           case 'error':
             error = e.data.message;
             break;
@@ -473,6 +482,7 @@
             streaming = null;
             messages.push(e.data);
             leaf = e.data.id;
+            lastRaw = { id: e.data.id, chunks: raw };
             break;
         }
         scrollDown();
@@ -825,8 +835,18 @@
                   title="Details"
                   class:on={openDetails[m.id]}
                   onclick={() => (openDetails[m.id] = !openDetails[m.id])}>ⓘ</button>
+                {#if lastRaw?.id === m.id}
+                  <button
+                    class="icon"
+                    title="Raw response chunks (this session only)"
+                    class:on={showRaw}
+                    onclick={() => (showRaw = !showRaw)}>{'{}'}</button>
+                {/if}
               {/if}
             </div>
+            {#if showRaw && lastRaw?.id === m.id}
+              <pre class="rawjson">{lastRaw.chunks.map((c) => JSON.stringify(c, null, 2)).join('\n\n') || '(no non-text chunks)'}</pre>
+            {/if}
             {#if openDetails[m.id]}
               <dl class="details">
                 {#each details(m) as [k, v]}
@@ -1057,6 +1077,7 @@
   .tool summary { cursor: pointer; font-family: monospace; }
   .tool.failed { border-color: #c44; }
   .tool pre { max-height: 300px; overflow: auto; margin: 2px 0 6px; padding: 6px; background: var(--field); white-space: pre-wrap; word-break: break-word; }
+  .rawjson { max-height: 400px; overflow: auto; margin: 6px 0 0; padding: 6px; background: var(--field); font-size: 0.8em; white-space: pre-wrap; word-break: break-word; }
   .tlabel { opacity: 0.6; font-size: 0.85em; margin-top: 4px; }
   .terr { color: #c44; margin-left: 6px; }
   .tstat { opacity: 0.7; margin-left: 6px; }

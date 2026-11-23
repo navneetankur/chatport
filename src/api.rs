@@ -740,6 +740,10 @@ fn generate(
                         name,
                         arguments,
                     }) => merge_call(&mut calls, index, id, name, &arguments),
+                    // Debug only: never stored, the frontend keeps it in memory.
+                    Ok(ChatEvent::Raw(v)) => {
+                        let _ = tx.send(ev("raw", v));
+                    }
                     Ok(ChatEvent::Done) => break,
                     Err(e) => {
                         asst.error = Some(format!("{e:#}"));

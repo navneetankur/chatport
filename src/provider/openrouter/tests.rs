@@ -294,3 +294,30 @@ fn web_searches_parsed_and_summed() {
             .is_none()
     );
 }
+
+#[test]
+fn raw_kept_only_for_non_text_chunks() {
+    let raw = |d: &str| {
+        parse_chunk(d)
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, ChatEvent::Raw(_)))
+    };
+    assert!(!raw(
+        r#"{"choices":[{"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}"#
+    ));
+    assert!(!raw(
+        r#"{"choices":[{"delta":{"reasoning":"hmm","reasoning_details":[]}}]}"#
+    ));
+    assert!(raw(
+        r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#
+    ));
+    assert!(raw(
+        r#"{"choices":[{"delta":{"annotations":[{"type":"url_citation"}]}}]}"#
+    ));
+    assert!(raw(
+        r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#
+    ));
+    assert!(!raw(r#"{"choices":[{"delta":{"tool_calls":[]}}]}"#));
+    assert!(!raw("[DONE]"));
+}

@@ -294,6 +294,33 @@ async fn fail(resp: reqwest::Response) -> anyhow::Error {
     return anyhow!("OpenRouter {status}: {text}");
 }
 
+/// Delta keys that only carry streamed text (tool-call arguments stream too;
+/// the UI shows the calls already).
+const TEXT_DELTA_KEYS: [&str; 5] = [
+    "role",
+    "content",
+    "reasoning",
+    "reasoning_details",
+    "tool_calls",
+];
+
+/// A chunk that only streams text: no usage, no finish_reason, and a delta
+/// with nothing but text keys. Everything else is kept for the raw view.
+fn is_plain_text(v: &Value) -> bool {
+    if v.get("usage").is_some_and(|u| !u.is_null()) {
+        return false;
+    }
+    let Some(choices) = v.get("choices").and_then(Value::as_array) else {
+        return false;
+    };
+    return choices.iter().all(|c| {
+        c.get("finish_reason").is_none_or(Value::is_null)
+            && c.get("delta")
+                .and_then(Value::as_object)
+                .is_some_and(|d| d.keys().all(|k| TEXT_DELTA_KEYS.contains(&k.as_str())))
+    });
+}
+
 /// Parse one SSE `data:` payload. Returns events to emit.
 fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     if data == "[DONE]" {
@@ -352,6 +379,9 @@ fn parse_chunk(data: &str) -> Result<Vec<ChatEvent>> {
     }
     if let Some(u) = v.get("usage").filter(|u| !u.is_null()) {
         out.push(ChatEvent::Usage(usage_from(u)));
+    }
+    if !is_plain_text(&v) {
+        out.push(ChatEvent::Raw(v));
     }
     Ok(out)
 }

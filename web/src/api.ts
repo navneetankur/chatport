@@ -172,6 +172,8 @@ export type StreamEvent =
   | { event: 'reasoning'; data: { text: string } }
   | { event: 'usage'; data: Usage }
   | { event: 'tool_round'; data: ToolRound }
+  /** Verbatim non-text provider chunk (usage, annotations, …); debug only. */
+  | { event: 'raw'; data: unknown }
   | { event: 'error'; data: { message: string } }
   | { event: 'batch'; data: PendingBatch }
   | { event: 'done'; data: Message };
