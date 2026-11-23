@@ -32,3 +32,5 @@
 - llmjob stdin only via explicit `-m -` (implicit read bites in loops/cron).
   `-c` always takes a value so it can't swallow the message text. `last` is an
   id ref file, not a symlink/copy (UI renames/moves would break a symlink).
+- llmjob batches are not polled by the server's batch poller: the server runs
+  on demand, so it can't guarantee fetching; `llmjob get --all` (manual/cron) instead.

@@ -37,6 +37,7 @@ usage:
   llmjob batch [opts] [-s FILE]... [-m FILE]... [--dir DIR] [TEXT...]
                                                            prints a job id
   llmjob get   ID|last [--dir DIR] [--wait]                exit 2 while running
+  llmjob get   --all                                       cache every finished job
   llmjob ls
   llmjob rm    ID|last...  |  --all [--force]          delete jobs (local + upstream)
 
@@ -51,7 +52,8 @@ options:
   -c, --continue ID   run: continue conversation ID (prefix/suffix) or `last`
       --dir DIR       batch: one request per file in DIR; get: write outputs there
       --wait          get: poll every minute until finished
-      --all           rm: every job (running ones are always skipped)
+      --all           get: check every unfetched job once, cache finished ones
+                      rm: every job (running ones are always skipped)
       --force         rm: also jobs finished upstream but never fetched
       --config PATH   default ~/.config/chatport/config.toml
       --keyfile PATH  key for the default key name (else OPENROUTER_API_KEY, config)
@@ -199,8 +201,11 @@ fn check_args(a: &Args) -> Result<()> {
     let prompt = !a.system.is_empty() || !a.msg.is_empty() || a.headers;
     let model = a.profile.is_some() || a.model.is_some() || a.effort.is_some();
     let bad = |what: &str| bail!("{what} does not apply to `{:?}`", a.cmd);
-    if a.cmd != Cmd::Rm && (a.all || a.force) {
-        return bad("--all/--force");
+    if a.force && a.cmd != Cmd::Rm {
+        return bad("--force");
+    }
+    if a.all && !matches!(a.cmd, Cmd::Rm | Cmd::Get) {
+        return bad("--all");
     }
     match a.cmd {
         Cmd::Run => {
@@ -220,7 +225,10 @@ fn check_args(a: &Args) -> Result<()> {
             if prompt || model || a.save || a.cont.is_some() {
                 return bad("prompt/model options");
             }
-            if a.words.len() != 1 {
+            if a.all && (!a.words.is_empty() || a.dir.is_some() || a.wait) {
+                bail!("get --all takes no job id, --dir or --wait");
+            }
+            if !a.all && a.words.len() != 1 {
                 bail!("expected one job id (or `last`)");
             }
         }
@@ -309,6 +317,7 @@ async fn dispatch(a: Args) -> Result<i32> {
         Cmd::Run => run(&ctx, &a, &profile).await,
         Cmd::Keep => keep(&ctx),
         Cmd::Batch => batch(&ctx, &a, &profile).await,
+        Cmd::Get if a.all => jobs::get_all(&ctx).await,
         Cmd::Get => jobs::get(&ctx, &a.words[0], a.dir.as_deref(), a.wait).await,
         Cmd::Ls => jobs::ls(&ctx),
         Cmd::Rm => jobs::rm(&ctx, &a.words, a.all, a.force).await,

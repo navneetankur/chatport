@@ -155,6 +155,58 @@ pub async fn submit(ctx: &Ctx, reqs: Vec<(String, ChatRequest)>) -> Result<i32> 
     return Ok(0);
 }
 
+/// One look at a job.
+enum Check {
+    /// Finished (completed or failed); raw batch cached locally.
+    Done(Value),
+    /// Still running: progress line for stderr.
+    Pending(String),
+}
+
+/// Reads the cache, or asks upstream once. A finished batch gets cached and
+/// its upstream copy deleted; a pending one updates the record's status.
+async fn check(ctx: &Ctx, jobs: &Jobs, job: &mut Job) -> Result<Check> {
+    let cached = jobs.results(&job.short);
+    if let Ok(b) = std::fs::read(&cached) {
+        return Ok(Check::Done(
+            serde_json::from_slice(&b).context("reading cached results")?,
+        ));
+    }
+    let key = ctx.config.key_for(job.key_name.as_deref())?.to_string();
+    let (status, progress) = match ctx.provider.batch_raw(&key, &job.batch_id).await? {
+        Some(v) => match parse_batch_all(&v) {
+            BatchState::Pending(info) => {
+                let counts = &v["request_counts"];
+                let progress = format!(
+                    "{}: {} ({}/{} done, {} failed)",
+                    job.short, info.status, counts["completed"], counts["total"], counts["failed"]
+                );
+                (info.status, progress)
+            }
+            _ => {
+                std::fs::write(&cached, serde_json::to_vec(&v)?)?;
+                // Results are kept locally now; free the upstream copy.
+                if let Err(e) = ctx.provider.delete_batch(&key, &job.batch_id).await {
+                    log::warn!("deleting batch {} upstream: {e:#}", job.batch_id);
+                }
+                return Ok(Check::Done(v));
+            }
+        },
+        None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
+            ("submitted".to_string(), format!("{}: submitted", job.short))
+        }
+        None => bail!(
+            "batch {} not found upstream (deleted, or older than 30 days)",
+            job.batch_id
+        ),
+    };
+    if status != job.status {
+        job.status = status;
+        jobs.put(job)?;
+    }
+    return Ok(Check::Pending(progress));
+}
+
 /// `llmjob get`.
 pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
@@ -166,47 +218,10 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
             job.names.len()
         );
     }
-    let key = ctx.config.key_for(job.key_name.as_deref())?.to_string();
-    let cached = jobs.results(&job.short);
-    let v: Value = loop {
-        if let Ok(b) = std::fs::read(&cached) {
-            break serde_json::from_slice(&b).context("reading cached results")?;
-        }
-        let (status, progress) = match ctx.provider.batch_raw(&key, &job.batch_id).await? {
-            Some(v) => match parse_batch_all(&v) {
-                BatchState::Pending(info) => {
-                    let counts = &v["request_counts"];
-                    let progress = format!(
-                        "{}: {} ({}/{} done, {} failed)",
-                        job.short,
-                        info.status,
-                        counts["completed"],
-                        counts["total"],
-                        counts["failed"]
-                    );
-                    (info.status, progress)
-                }
-                _ => {
-                    std::fs::write(&cached, serde_json::to_vec(&v)?)?;
-                    // Results are kept locally now; free the upstream copy.
-                    if let Err(e) = ctx.provider.delete_batch(&key, &job.batch_id).await {
-                        log::warn!("deleting batch {} upstream: {e:#}", job.batch_id);
-                    }
-                    break v;
-                }
-            },
-            None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
-                ("submitted".to_string(), format!("{}: submitted", job.short))
-            }
-            None => bail!(
-                "batch {} not found upstream (deleted, or older than 30 days)",
-                job.batch_id
-            ),
-        };
-        eprintln!("{progress}");
-        if status != job.status {
-            job.status = status;
-            jobs.put(&job)?;
+    let v = loop {
+        match check(ctx, &jobs, &mut job).await? {
+            Check::Done(v) => break v,
+            Check::Pending(progress) => eprintln!("{progress}"),
         }
         if !wait {
             return Ok(EXIT_PENDING);
@@ -214,6 +229,44 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
         tokio::time::sleep(WAIT_GAP).await;
     };
     return write_results(&jobs, job, &v, out);
+}
+
+/// `llmjob get --all`: checks every unfetched job once and caches the
+/// finished ones (no outputs written). Exit 2 if any is still running, 1 if
+/// any check failed.
+pub async fn get_all(ctx: &Ctx) -> Result<i32> {
+    let jobs = Jobs::open(&ctx.data_dir)?;
+    let (mut fetched, mut running, mut failed) = (0, 0, 0);
+    for mut job in jobs.all()? {
+        if jobs.results(&job.short).exists() {
+            continue;
+        }
+        match check(ctx, &jobs, &mut job).await {
+            Ok(Check::Done(v)) => {
+                let state = match parse_batch_all(&v) {
+                    BatchState::Failed(_) => "failed",
+                    _ => "completed",
+                };
+                set_status(&jobs, &mut job, state)?;
+                eprintln!("{}: {state}, cached", job.short);
+                fetched += 1;
+            }
+            Ok(Check::Pending(progress)) => {
+                eprintln!("{progress}");
+                running += 1;
+            }
+            Err(e) => {
+                eprintln!("{}: {e:#}", job.short);
+                failed += 1;
+            }
+        }
+    }
+    eprintln!("fetched {fetched}, still running {running}, failed {failed}");
+    return Ok(match (failed, running) {
+        (0, 0) => 0,
+        (0, _) => EXIT_PENDING,
+        _ => 1,
+    });
 }
 
 /// Writes outputs of a finished batch. Exit 1 if anything failed.

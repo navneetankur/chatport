@@ -27,7 +27,11 @@
   `jobs/<id>.results.json`, upstream deleted, so `get` repeats offline. Without
   `--dir` only one-request jobs (stdout); with it `OUT/<name>`, errors in
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
-- `ls` local jobs. `rm ID…` / `rm --all`: all ids resolved first (a typo
+- `get --all`: checks every unfetched job once, caches finished ones (no
+  outputs written), updates statuses for `ls`. Exit 2 if any still running, 1
+  if a check failed. Meant for manual or cron use; the server does not poll
+  llmjob jobs (it isn't always running).
+- `ls` local jobs (status as of the last check). `rm ID…` / `rm --all`: all ids resolved first (a typo
   removes nothing). Fetched → local files removed. Not fetched: running is
   always skipped (no cancel); finished upstream is skipped unless `--force`
   (then deleted upstream); gone upstream → local removed. Summary on stderr,
