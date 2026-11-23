@@ -159,6 +159,10 @@ Title: after first assistant reply, fire a cheap model call to generate a title 
 Per-chat switch `meta.tools` (needs `file_root`). Tools: `list_dir`, `read_file` (opt. line range), `write_file` (creates dirs), `edit_file` (exact unique replace). No delete. Jailed to `file_root` (relative only, no `..`, symlinks checked on the deepest existing ancestor). 256 KB cap. Applied directly, no approval; each write stores a unified diff (diff only, no old content). No MCP.
 Storage: the whole loop runs in one generation and is saved as one assistant message with `tool_rounds: [{content, calls, results}]` — tree/branching unchanged. Context expands rounds into `tool_calls` + `tool` messages; with tools off they are folded into the assistant text. Calls while tools are off → message `warning`.
 
+## Web tools
+Per-chat switch `meta.web_tools` (off by default). Uses OpenRouter server tools on `/chat/completions` (OpenRouter runs the loop, the stream just pauses with `: OPENROUTER PROCESSING` comments): `openrouter:web_search` and `openrouter:web_fetch`, both pinned to `engine: "exa"`, plus `openrouter:datetime` (free). Limits: search `max_results 5, max_uses 3`; fetch `max_uses 3, max_content_tokens 10000`. Limits are per API request, so with file tools on they reset every tool round (accepted). Only sent when the model's `supported_parameters` has `tools` (unknown ids, e.g. routers, get them anyway); otherwise a message `warning`. Not in batch. Citations come back inline as markdown links; `annotations` are ignored. `usage.server_tool_use_details.web_search_requests` is kept as `Usage.web_searches`.
+Why Exa (tested 2026-11-23, see TRACKER): `openrouter` fetch engine returns raw HTML; native fetch (Anthropic) was blocked on one site and stale on another; Gemini has no native fetch. Native search costs ~2x Exa (Google $14/1k per query, several queries per request; Anthropic $10/1k + results as input tokens) with redirect URLs (Google) or secondary sources (Anthropic).
+
 ## Later / not now
 
 Images & PDFs (→ `attachments/<hash>` refs), search (SQLite index over JSONL), auth, other providers, multi-user.

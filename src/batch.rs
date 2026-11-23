@@ -96,6 +96,7 @@ pub fn submit(
                 cache: meta.cache,
                 reasoning_effort: meta.reasoning_effort,
                 tools: vec![],
+                web_tools: false,
                 session_id: meta.id.clone(),
             };
             let (id, info) = s.provider.submit_batch(&req).await?;

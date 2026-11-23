@@ -519,6 +519,7 @@
             (u.reasoning_tokens ? ` (${u.reasoning_tokens} reasoning)` : '') +
             (u.cached_tokens ? ` · ${u.cached_tokens} cached` : ''),
       ],
+      ['Web searches', u?.web_searches ? String(u.web_searches) : undefined],
       ...costRows(u),
       ['Time', new Date(m.created_at).toLocaleString()],
     ];

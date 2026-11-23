@@ -8,6 +8,8 @@ export interface Usage {
   cost?: number;
   /** BYOK: what the upstream provider billed to the user's own key. */
   upstream_cost?: number;
+  /** Web searches run by OpenRouter server tools. */
+  web_searches?: number;
 }
 
 export interface Attachment {
@@ -68,6 +70,8 @@ export interface Meta {
   key_name?: string | null;
   file_root?: string | null;
   tools?: boolean;
+  /** OpenRouter server tools: web search, web fetch, datetime. */
+  web_tools?: boolean;
   leaf?: string | null;
   /** Batch reply being waited for; sends are blocked until it is fetched or forgotten. */
   pending_batch?: PendingBatch | null;
@@ -148,6 +152,7 @@ export function draftPatch(d: Meta): MetaPatch {
     key_name: d.key_name ?? null,
     file_root: d.file_root ?? '',
     tools: d.tools ?? false,
+    web_tools: d.web_tools ?? false,
   };
 }
 
@@ -241,6 +246,8 @@ export interface ModelInfo {
   name: string;
   context_length?: number;
   pricing?: { prompt?: string; completion?: string };
+  /** Accepts `tools` (needed for file and web tools). */
+  tools?: boolean;
 }
 
 let modelsCache: Promise<ModelInfo[]> | null = null;
@@ -270,6 +277,7 @@ export type MetaPatch = Partial<{
   key_name: string | null; // null = config default
   file_root: string; // "" clears
   tools: boolean;
+  web_tools: boolean;
   group: string | null; // null or "" = ungrouped
 }>;
 

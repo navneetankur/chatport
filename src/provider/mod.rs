@@ -54,6 +54,13 @@ pub struct Usage {
     /// while `cost` is OpenRouter's charge, often 0).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_cost: Option<f64>,
+    /// Web searches run by server tools (`server_tool_use_details`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub web_searches: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -100,6 +107,7 @@ impl Usage {
         self.completion_tokens += o.completion_tokens;
         self.cached_tokens += o.cached_tokens;
         self.reasoning_tokens += o.reasoning_tokens;
+        self.web_searches += o.web_searches;
         self.cost = add_opt(self.cost, o.cost);
         self.upstream_cost = add_opt(self.upstream_cost, o.upstream_cost);
     }
@@ -125,6 +133,8 @@ pub struct ChatRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
     /// Tools offered; empty = none.
     pub tools: Vec<ToolSpec>,
+    /// Offer the provider's server-side web tools (search, fetch, datetime).
+    pub web_tools: bool,
     /// Stable per-conversation key (OpenRouter `session_id`: sticky provider
     /// routing from the first request, log grouping).
     pub session_id: String,
@@ -156,6 +166,8 @@ pub struct ModelInfo {
     pub name: String,
     pub context_length: Option<u64>,
     pub pricing: Value,
+    /// Model accepts `tools` (function calling); server tools need it too.
+    pub tools: bool,
 }
 
 /// Batch models are listed with this suffix (OpenRouter `<slug>:batch`).

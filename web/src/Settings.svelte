@@ -21,11 +21,15 @@
   let keyName = $state(init.key_name ?? '');
   let fileRoot = $state(init.file_root ?? '');
   let tools = $state(init.tools ?? false);
+  let webTools = $state(init.web_tools ?? false);
   let keys = $state<{ names: string[]; default: string }>({ names: [], default: '' });
   let models = $state<ModelInfo[]>([]);
   let recent = $state<string[]>([]);
   let error = $state('');
   let saving = $state(false);
+
+  /** Known model without tool support (unknown ids, e.g. routers, may have it). */
+  const noTools = $derived(models.find((m) => m.id === model.trim())?.tools === false);
 
   /** Parsed provider JSON, or null when empty / invalid. */
   const prov = $derived.by((): Record<string, unknown> | null => {
@@ -76,6 +80,7 @@
             key_name: keyName || null,
             file_root: fileRoot.trim(),
             tools,
+            web_tools: webTools,
             provider,
           })
         : {
@@ -87,6 +92,7 @@
             key_name: keyName || null,
             file_root: fileRoot.trim() || null,
             tools,
+            web_tools: webTools,
             provider: provider ?? undefined,
           };
       onsaved(m);
@@ -144,6 +150,12 @@
   <label class="row">
     <input type="checkbox" bind:checked={tools} disabled={!fileRoot.trim()} />
     File tools: the model can list, read, write and edit text files in the file root (applied directly)
+  </label>
+
+  <label class="row">
+    <input type="checkbox" bind:checked={webTools} disabled={noTools && !webTools} />
+    Web tools: the model can search the web, fetch pages (Exa, ~$0.007/search, $0.001/page, plus tokens) and read the date
+    {#if noTools}<small>(this model does not support tools)</small>{/if}
   </label>
 
   <label>

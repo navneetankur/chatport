@@ -208,6 +208,7 @@ fn new_meta(s: &AppState, id: String) -> Meta {
         key_name: None,
         file_root: s.config.default_file_root.clone(),
         tools: false,
+        web_tools: false,
         leaf: None,
         pending_batch: None,
     };
@@ -306,6 +307,7 @@ struct PatchReq {
     /// "" clears.
     file_root: Option<String>,
     tools: Option<bool>,
+    web_tools: Option<bool>,
     /// Move to this group; null or "" = ungrouped.
     #[serde(default, deserialize_with = "some_option")]
     group: Option<Option<String>>,
@@ -378,6 +380,9 @@ fn apply_patch(s: &AppState, meta: &mut Meta, r: PatchReq) -> R<Option<String>> 
     }
     if let Some(t) = r.tools {
         meta.tools = t;
+    }
+    if let Some(t) = r.web_tools {
+        meta.web_tools = t;
     }
     return Ok(group);
 }
@@ -603,6 +608,22 @@ fn merge_call(
     c.arguments.push_str(args);
 }
 
+/// Why web tools can't be offered to `model`, if they can't. Ids missing from
+/// the model list (routers like `openrouter/free`) get them: the router picks
+/// a tool-capable model. A failed model list doesn't block the request.
+async fn web_tools_unsupported(s: &AppState, model: &str) -> Option<String> {
+    let models = match s.provider.list_models().await {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("model list unavailable, sending web tools anyway: {e:#}");
+            return None;
+        }
+    };
+    let m = models.iter().find(|m| m.id == model)?;
+    return (!m.tools)
+        .then(|| format!("{model} does not support tools; web tools were not offered"));
+}
+
 /// Streams the reply as SSE. Generation runs in a spawned task so the reply is
 /// saved even if the browser disconnects.
 fn generate(
@@ -639,6 +660,7 @@ fn generate(
         } else {
             vec![]
         },
+        web_tools: meta.web_tools,
         session_id: meta.id.clone(),
     };
     let conv_id = meta.id.clone();
@@ -652,6 +674,13 @@ fn generate(
         let mut asst = Message::assistant(user.id.clone(), meta.model.clone());
         let mut done = false;
         let mut total: Option<Usage> = None;
+        if req.web_tools
+            && let Some(w) = web_tools_unsupported(&s, &req.model).await
+        {
+            log::warn!("{conv_id}: {w}");
+            req.web_tools = false;
+            asst.warning = Some(w);
+        }
         // Each round is one model request; it continues while the model calls tools.
         'rounds: for round in 0.. {
             if let Err(e) = &key {

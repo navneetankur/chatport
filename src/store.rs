@@ -54,6 +54,9 @@ pub struct Meta {
     /// Offer file tools (inside `file_root`) to the model.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub tools: bool,
+    /// Offer OpenRouter server tools (web search/fetch, datetime) to the model.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web_tools: bool,
     /// Currently shown branch tip. None = last appended message.
     #[serde(default)]
     pub leaf: Option<String>,
