@@ -7,6 +7,7 @@ pub mod batch;
 pub mod config;
 pub mod files;
 pub mod listen;
+pub mod llmjob;
 pub mod provider;
 pub mod recent;
 pub mod store;
