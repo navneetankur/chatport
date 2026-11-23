@@ -242,6 +242,48 @@ fn parse_batch_states() {
 }
 
 #[test]
+fn multi_batch_body_one_entry_per_request() {
+    let a = req("m:batch", CachePolicy::Off);
+    let mut b = a.clone();
+    b.messages = vec![ChatMessage::text(Role::User, "other".into())];
+    let body = build_multi_batch_body(&[("a.txt".into(), a.clone()), ("b.txt".into(), b)]).unwrap();
+    let rs = body["requests"].as_array().unwrap();
+    assert_eq!(rs.len(), 2);
+    assert_eq!(
+        (rs[0]["custom_id"].as_str(), rs[1]["custom_id"].as_str()),
+        (Some("a.txt"), Some("b.txt"))
+    );
+    assert_eq!(rs[1]["body"]["messages"][1]["content"], "other");
+    assert_eq!(body["model"], "m:batch");
+    let mut c = a.clone();
+    c.model = "other:batch".into();
+    assert!(build_multi_batch_body(&[("a".into(), a), ("c".into(), c)]).is_err());
+    assert!(build_multi_batch_body(&[]).is_err());
+}
+
+#[test]
+fn parse_batch_all_keeps_every_result() {
+    let v = json!({ "status": "completed", "results": [
+        { "custom_id": "b.txt", "error": { "message": "bad" } },
+        { "custom_id": "a.txt", "error": null, "response": { "body": {
+            "choices": [{ "message": { "content": "A" } }] } } }
+    ], "usage": { "prompt_tokens": 9, "completion_tokens": 1, "cost": 0.5 } });
+    let BatchState::Done { replies, usage } = parse_batch_all(&v) else {
+        panic!()
+    };
+    assert_eq!(replies.len(), 2);
+    assert_eq!(replies[0].0, "b.txt");
+    assert_eq!(replies[0].1.error.as_deref(), Some("bad"));
+    assert_eq!(
+        (replies[1].0.as_str(), replies[1].1.content.as_str()),
+        ("a.txt", "A")
+    );
+    assert_eq!(usage.unwrap().cost, Some(0.5));
+    let f = parse_batch_all(&json!({ "status": "failed", "error": { "message": "x" } }));
+    assert!(matches!(f, BatchState::Failed(e) if e == "batch failed: x"));
+}
+
+#[test]
 fn web_tools_in_body() {
     let mut r = req("x/y", CachePolicy::Off);
     r.web_tools = true;

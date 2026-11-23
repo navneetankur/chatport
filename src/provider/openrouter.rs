@@ -39,6 +39,44 @@ pub struct OpenRouter {
 }
 
 impl OpenRouter {
+    /// `POST /batches` with a prebuilt body (see `build_multi_batch_body`).
+    pub async fn submit_batch_body(&self, key: &str, body: &Value) -> Result<(String, BatchInfo)> {
+        let resp = self
+            .http
+            .post(format!("{BASE}/batches"))
+            .bearer_auth(key)
+            .json(body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        let v: Value = resp.json().await?;
+        let id = v["id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("batch submit: no id in response"))?;
+        let info = batch_info(&v, v["status"].as_str().unwrap_or("validating"));
+        log::info!("batch {id} submitted: {info:?}");
+        return Ok((id.to_string(), info));
+    }
+
+    /// `GET /batches/{id}` as JSON; None on 404.
+    pub async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>> {
+        let resp = self
+            .http
+            .get(format!("{BASE}/batches/{id}"))
+            .bearer_auth(key)
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        return Ok(Some(resp.json().await?));
+    }
+
     pub fn new(key: String) -> Result<Self> {
         let http = reqwest::Client::builder()
             .default_headers(attribution_headers())
@@ -153,39 +191,62 @@ fn web_tools() -> [Value; 3] {
 /// Batch keeps only these `provider` keys; any other routing preference is a 400.
 const BATCH_PROVIDER_KEYS: [&str; 2] = ["only", "allow_fallbacks"];
 
-/// `POST /batches` body with one request. The top-level fields must precede
-/// `requests` (OpenRouter streams the body); serde_json sorts keys, and
-/// endpoint < model < provider < requests, which a test pins down.
+/// `POST /batches` body with one request.
 pub fn build_batch_body(req: &ChatRequest) -> Value {
-    let mut body = build_body(req);
-    let obj = body.as_object_mut().expect("body is an object");
-    obj.remove("stream");
-    obj.remove("model");
-    let provider = obj.remove("provider").and_then(|p| {
-        let p = p.as_object()?;
-        let dropped: Vec<&String> = p
-            .keys()
-            .filter(|k| !BATCH_PROVIDER_KEYS.contains(&k.as_str()))
-            .collect();
-        if !dropped.is_empty() {
-            log::info!("batch: dropping provider options {dropped:?} (not supported)");
+    return build_multi_batch_body(&[("r1".to_string(), req.clone())])
+        .expect("one request always builds");
+}
+
+/// `POST /batches` body with one request per `(custom_id, request)`. All
+/// requests must use the same model; top-level `provider` comes from the
+/// first. The top-level fields must precede `requests` (OpenRouter streams
+/// the body); serde_json sorts keys, and endpoint < model < provider <
+/// requests, which a test pins down.
+pub fn build_multi_batch_body(reqs: &[(String, ChatRequest)]) -> Result<Value> {
+    let (_, first) = reqs.first().context("batch needs at least one request")?;
+    let mut requests = Vec::with_capacity(reqs.len());
+    let mut provider = None;
+    for (i, (custom_id, req)) in reqs.iter().enumerate() {
+        if req.model != first.model {
+            bail!("batch mixes models {:?} and {:?}", first.model, req.model);
         }
-        let kept: serde_json::Map<String, Value> = p
-            .iter()
-            .filter(|(k, _)| BATCH_PROVIDER_KEYS.contains(&k.as_str()))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        (!kept.is_empty()).then_some(Value::Object(kept))
-    });
+        let mut body = build_body(req);
+        let obj = body.as_object_mut().expect("body is an object");
+        obj.remove("stream");
+        obj.remove("model");
+        let p = obj.remove("provider");
+        if i == 0 {
+            provider = p.and_then(|p| batch_provider(&p));
+        }
+        requests.push(json!({ "custom_id": custom_id, "body": body }));
+    }
     let mut batch = json!({
         "endpoint": "/v1/chat/completions",
-        "model": req.model,
-        "requests": [{ "custom_id": "r1", "body": body }],
+        "model": first.model,
+        "requests": requests,
     });
     if let Some(p) = provider {
         batch["provider"] = p;
     }
-    return batch;
+    return Ok(batch);
+}
+
+/// The `provider` object reduced to what batch accepts; None when nothing is left.
+fn batch_provider(p: &Value) -> Option<Value> {
+    let p = p.as_object()?;
+    let dropped: Vec<&String> = p
+        .keys()
+        .filter(|k| !BATCH_PROVIDER_KEYS.contains(&k.as_str()))
+        .collect();
+    if !dropped.is_empty() {
+        log::info!("batch: dropping provider options {dropped:?} (not supported)");
+    }
+    let kept: serde_json::Map<String, Value> = p
+        .iter()
+        .filter(|(k, _)| BATCH_PROVIDER_KEYS.contains(&k.as_str()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    return (!kept.is_empty()).then_some(Value::Object(kept));
 }
 
 fn usage_from(u: &Value) -> Usage {
@@ -225,40 +286,61 @@ fn batch_info(v: &Value, status: &str) -> BatchInfo {
     };
 }
 
-/// Interprets `GET /batches/{id}`.
-pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
+/// Where a multi-request batch stands.
+#[derive(Debug)]
+pub enum BatchState {
+    Pending(BatchInfo),
+    /// The whole batch failed, expired or was cancelled.
+    Failed(String),
+    /// Finished. One reply per request, in upstream order (match on custom_id).
+    /// `usage` is the batch total, the only place `cost` is reported.
+    Done {
+        replies: Vec<(String, BatchReply)>,
+        usage: Option<Usage>,
+    },
+}
+
+/// Interprets `GET /batches/{id}` for any number of requests.
+pub fn parse_batch_all(v: &Value) -> BatchState {
     let status = v["status"].as_str().unwrap_or("unknown");
-    let msg = |v: &Value| {
-        v.pointer("/error/message")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    };
     match status {
         "completed" => {}
         "failed" | "expired" | "cancelled" => {
-            return Ok(BatchPoll::Done(BatchReply {
-                error: Some(format!(
-                    "batch {status}: {}",
-                    msg(v).unwrap_or_else(|| "no details".into())
-                )),
-                ..Default::default()
-            }));
+            return BatchState::Failed(format!(
+                "batch {status}: {}",
+                err_msg(v).unwrap_or_else(|| "no details".into())
+            ));
         }
-        s => return Ok(BatchPoll::Pending(batch_info(v, s))),
+        s => return BatchState::Pending(batch_info(v, s)),
     }
-    let Some(result) = v["results"].as_array().and_then(|r| r.first()) else {
+    let Some(results) = v["results"].as_array() else {
         // Completed, but results not attached yet (docs: can lag briefly).
-        return Ok(BatchPoll::Pending(batch_info(v, "finalizing")));
+        return BatchState::Pending(batch_info(v, "finalizing"));
     };
-    // Cost lives at batch level (docs); logged until verified live.
-    log::info!("batch {} usage: {}", v["id"], v["usage"]);
-    let batch_usage = v.get("usage").filter(|u| !u.is_null()).map(usage_from);
+    let replies = results
+        .iter()
+        .map(|r| {
+            let id = r["custom_id"].as_str().unwrap_or_default().to_string();
+            (id, parse_result(v, r))
+        })
+        .collect();
+    let usage = v.get("usage").filter(|u| !u.is_null()).map(usage_from);
+    return BatchState::Done { replies, usage };
+}
+
+fn err_msg(v: &Value) -> Option<String> {
+    v.pointer("/error/message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// One entry of `results`. `batch` is the whole batch (fallback provider).
+fn parse_result(batch: &Value, result: &Value) -> BatchReply {
     if !result["error"].is_null() {
-        return Ok(BatchPoll::Done(BatchReply {
-            error: Some(msg(result).unwrap_or_else(|| result["error"].to_string())),
-            usage: batch_usage,
+        return BatchReply {
+            error: Some(err_msg(result).unwrap_or_else(|| result["error"].to_string())),
             ..Default::default()
-        }));
+        };
     }
     let body = &result["response"]["body"];
     let s = |p: &str| body.pointer(p).and_then(Value::as_str).map(str::to_string);
@@ -271,20 +353,43 @@ pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
                 .collect()
         })
         .unwrap_or_default();
-    return Ok(BatchPoll::Done(BatchReply {
+    return BatchReply {
         content: s("/choices/0/message/content").unwrap_or_default(),
         reasoning: s("/choices/0/message/reasoning").unwrap_or_default(),
         model: s("/model").filter(|m| !m.is_empty()),
         provider: s("/provider")
-            .or_else(|| v["provider"].as_str().map(str::to_string))
+            .or_else(|| batch["provider"].as_str().map(str::to_string))
             .filter(|p| !p.is_empty()),
-        usage: merge_batch_cost(
-            body.get("usage").filter(|u| !u.is_null()).map(usage_from),
-            batch_usage,
-        ),
+        usage: body.get("usage").filter(|u| !u.is_null()).map(usage_from),
         error: None,
         tool_calls,
-    }));
+    };
+}
+
+/// Interprets `GET /batches/{id}` of a one-request batch.
+pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
+    match parse_batch_all(v) {
+        BatchState::Pending(info) => return Ok(BatchPoll::Pending(info)),
+        BatchState::Failed(e) => {
+            return Ok(BatchPoll::Done(BatchReply {
+                error: Some(e),
+                ..Default::default()
+            }));
+        }
+        BatchState::Done { replies, usage } => {
+            // Cost lives at batch level (docs); logged until verified live.
+            log::info!("batch {} usage: {}", v["id"], v["usage"]);
+            let Some((_, mut r)) = replies.into_iter().next() else {
+                return Ok(BatchPoll::Pending(batch_info(v, "finalizing")));
+            };
+            // An errored request has no usage of its own: show the batch's.
+            r.usage = match r.error {
+                Some(_) => usage,
+                None => merge_batch_cost(r.usage, usage),
+            };
+            return Ok(BatchPoll::Done(r));
+        }
+    }
 }
 
 /// Error body of a failed OpenRouter call as an `anyhow` error.
@@ -506,40 +611,16 @@ impl Provider for OpenRouter {
     }
 
     async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)> {
-        let resp = self
-            .http
-            .post(format!("{BASE}/batches"))
-            .bearer_auth(&req.key)
-            .json(&build_batch_body(req))
-            .send()
-            .await?;
-        if !resp.status().is_success() {
-            return Err(fail(resp).await);
-        }
-        let v: Value = resp.json().await?;
-        let id = v["id"]
-            .as_str()
-            .ok_or_else(|| anyhow!("batch submit: no id in response"))?;
-        let info = batch_info(&v, v["status"].as_str().unwrap_or("validating"));
-        log::info!("batch {id} submitted: {info:?}");
-        return Ok((id.to_string(), info));
+        return self
+            .submit_batch_body(&req.key, &build_batch_body(req))
+            .await;
     }
 
     async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll> {
-        let resp = self
-            .http
-            .get(format!("{BASE}/batches/{id}"))
-            .bearer_auth(key)
-            .send()
-            .await?;
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(BatchPoll::NotFound);
+        match self.batch_raw(key, id).await? {
+            None => Ok(BatchPoll::NotFound),
+            Some(v) => parse_batch(&v),
         }
-        if !resp.status().is_success() {
-            return Err(fail(resp).await);
-        }
-        let v: Value = resp.json().await?;
-        return parse_batch(&v);
     }
 
     async fn delete_batch(&self, key: &str, id: &str) -> Result<()> {
