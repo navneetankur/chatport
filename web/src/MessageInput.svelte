@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Message editor shared by the composer and inline edit: textarea, 📎 upload,
+  // Message editor shared by the composer and inline edit: textarea, "+" menu (upload / pick earlier),
   // `@path` mentions (chips + autocomplete), removable attachment chips.
   import { tick, untrack, type Snippet } from 'svelte';
   import * as api from './api';
@@ -68,6 +68,21 @@
       pickFilter = '';
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // "+" menu: Upload file / Pick existing. Closes on outside click or Esc.
+  let menuOpen = $state(false);
+  let addWrap: HTMLDivElement | undefined = $state();
+
+  function onWindowClick(e: MouseEvent) {
+    if (menuOpen && addWrap && !addWrap.contains(e.target as Node)) menuOpen = false;
+  }
+
+  function onWindowKey(e: KeyboardEvent) {
+    if (menuOpen && e.key === 'Escape') {
+      e.preventDefault();
+      menuOpen = false;
     }
   }
 
@@ -214,6 +229,11 @@
       e.preventDefault();
       return;
     }
+    if (menuOpen && e.key === 'Escape') {
+      e.preventDefault();
+      menuOpen = false;
+      return;
+    }
     if (textarea && emacsKey(e, textarea)) {
       updateComp();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -225,6 +245,8 @@
     }
   }
 </script>
+
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
 
 <div class="mi" class:compact>
   {#if attachments.length || Object.keys(atFiles).length || error}
@@ -253,8 +275,15 @@
       bind:this={fileInput}
       onchange={(e) => addFiles(e.currentTarget.files)}
     />
-    <button type="button" title="Attach text/markdown files" onclick={() => fileInput?.click()}>📎</button>
-    <button type="button" class="pick-btn" title="Earlier attachments" onclick={togglePicker}>🗂</button>
+    <div class="add" bind:this={addWrap}>
+      <button type="button" class="add-btn" title="Attach" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => { menuOpen = !menuOpen; if (menuOpen) picker = null; }}>+</button>
+      {#if menuOpen}
+        <div class="menu" role="menu">
+          <button type="button" role="menuitem" onclick={() => { menuOpen = false; fileInput?.click(); }}>📎 Upload file…</button>
+          <button type="button" role="menuitem" onclick={() => { menuOpen = false; togglePicker(); }}>🗂 Pick existing…</button>
+        </div>
+      {/if}
+    </div>
     {#if picker}
       <div class="picker">
         <!-- svelte-ignore a11y_autofocus -->
@@ -323,7 +352,19 @@
   /* Edit: textarea on its own row, then 📎 left and the actions right. */
   .compact form { padding: 0; border-top: none; flex-wrap: wrap; justify-content: flex-end; }
   .compact textarea { order: -1; flex-basis: 100%; }
-  .compact form > .pick-btn { margin-right: auto; }
+  .compact form > .add { margin-right: auto; }
+  .add { position: relative; display: flex; }
+  .add-btn { font-size: 1.2em; line-height: 1; min-width: 2em; }
+  .menu {
+    position: absolute; bottom: 100%; left: 0; z-index: 6; margin: 0 0 4px; padding: 4px 0;
+    display: flex; flex-direction: column; white-space: nowrap;
+    background: var(--field); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9em;
+  }
+  .menu button {
+    background: none; border: none; border-radius: 0; text-align: left; color: inherit;
+    font: inherit; padding: 4px 12px; cursor: pointer;
+  }
+  .menu button:hover { background: #4a8af433; }
   .comp {
     position: absolute; bottom: 100%; left: 16px; right: 16px; z-index: 5;
     max-height: 40vh; overflow-y: auto; margin: 0 0 4px; padding: 4px 0; list-style: none;
