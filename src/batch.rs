@@ -10,8 +10,9 @@
 //! restarts. Every pending batch is checked once at startup.
 //!
 //! llmjob batch jobs (`data_dir/llmjob/jobs/`) share the poller under keys
-//! `llmjob:<short>`: found by the startup scan, or by a rescan the CLI asks
-//! for (`llmjob notify` → `POST api/llmjob/rescan`). Same gaps, by job age.
+//! `llmjob:<short>`: found by the startup scan, and by an inotify watch on
+//! `llmjob/jobs/pending/` for jobs submitted while the server runs
+//! (`POST api/llmjob/rescan` does a scan by hand). Same gaps, by job age.
 //! A finished job is cached for `llmjob get`; nothing is written elsewhere.
 //!
 //! The poller sleeps until the earliest due check; `schedule`/`unschedule`
@@ -304,27 +305,73 @@ fn data_dir(s: &AppState) -> std::path::PathBuf {
     crate::config::expand_tilde(&s.config.data_dir)
 }
 
-/// `POST api/llmjob/rescan` (`llmjob notify`): schedules every unfetched llmjob
-/// job not scheduled yet, by its age (a fresh one: first check in 5 min).
-/// Already scheduled jobs keep their slot.
+/// Schedules llmjob job `short` by its age, unless it is scheduled already
+/// (so repeats cause no burst of checks). True if it was added.
+fn schedule_job(s: &AppState, short: &str, created_at: u64) -> bool {
+    let key = format!("{JOB_PREFIX}{short}");
+    if s.batch_polls.lock().unwrap().contains_key(&key) {
+        return false;
+    }
+    let gap = next_gap(age_since(created_at), s.config.batch.poll_interval);
+    schedule(s, &key, gap);
+    log::info!("llmjob {short}: scheduled, first check in {gap:?}");
+    return true;
+}
+
+/// `POST api/llmjob/rescan`: schedules every unfetched llmjob job not
+/// scheduled yet. The watcher normally makes this unnecessary; kept for a UI
+/// button and for setups where inotify misses changes.
 pub async fn job_rescan_handler(State(s): St) -> R<Json<Value>> {
-    let cap = s.config.batch.poll_interval;
-    if cap.is_zero() {
+    if s.config.batch.poll_interval.is_zero() {
         return Ok(Json(json!({ "scheduled": 0, "auto_poll": false })));
     }
     let jobs = crate::llmjob::jobs::unfetched(&data_dir(&s)).map_err(|e| bad(&format!("{e:#}")))?;
-    let mut added = 0;
-    for (short, created) in jobs {
-        let key = format!("{JOB_PREFIX}{short}");
-        if s.batch_polls.lock().unwrap().contains_key(&key) {
-            continue;
-        }
-        let gap = next_gap(age_since(created), cap);
-        schedule(&s, &key, gap);
-        log::info!("llmjob {short}: scheduled, first check in {gap:?}");
-        added += 1;
-    }
+    let added = jobs
+        .into_iter()
+        .filter(|(short, created)| schedule_job(&s, short, *created))
+        .count();
     Ok(Json(json!({ "scheduled": added, "auto_poll": true })))
+}
+
+/// Watches `llmjob/jobs/pending/` (inotify): a job record written by the CLI
+/// gets scheduled at once. Sleeps in the kernel while nothing happens.
+fn start_job_watcher(s: Arc<AppState>) -> Result<()> {
+    use inotify::{Inotify, WatchMask};
+    let dir = crate::llmjob::jobs::pending_dir(&data_dir(&s))?;
+    let ino = Inotify::init()?;
+    // Records are written as tmp + rename (MOVED_TO); CREATE for anything else.
+    ino.watches()
+        .add(&dir, WatchMask::CREATE | WatchMask::MOVED_TO)?;
+    let mut events = ino.into_event_stream([0u8; 4096])?;
+    log::info!("watching {} for llmjob jobs", dir.display());
+    tokio::spawn(async move {
+        while let Some(ev) = events.next().await {
+            let ev = match ev {
+                Ok(ev) => ev,
+                Err(e) => {
+                    log::warn!("llmjob watcher stopped: {e}");
+                    return;
+                }
+            };
+            let Some(short) = ev
+                .name
+                .as_ref()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".json"))
+                .filter(|n| !n.contains('.'))
+            else {
+                continue; // tmp or results files
+            };
+            match crate::llmjob::jobs::pending_created_at(&data_dir(&s), short) {
+                Ok(Some(created)) => {
+                    schedule_job(&s, short, created);
+                }
+                Ok(None) => {} // moved on (fetched / removed) already
+                Err(e) => log::warn!("llmjob watcher: {short}: {e:#}"),
+            }
+        }
+    });
+    return Ok(());
 }
 
 /// Starts the background poller unless `[batch] poll_interval` is 0.
@@ -338,6 +385,9 @@ pub fn start_poller(s: Arc<AppState>) {
         match scan(&s) {
             Ok(n) => log::info!("batch auto-poll every ≤{cap:?}; {n} pending at startup"),
             Err(e) => log::warn!("batch auto-poll: startup scan failed: {e:#}"),
+        }
+        if let Err(e) = start_job_watcher(s.clone()) {
+            log::warn!("llmjob watcher not started ({e:#}); new jobs wait for a restart or rescan");
         }
         loop {
             let next = s.batch_polls.lock().unwrap().values().min().copied();

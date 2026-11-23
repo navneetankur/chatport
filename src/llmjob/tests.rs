@@ -67,24 +67,6 @@ fn rm_args() {
 }
 
 #[test]
-fn server_base_from_flag_or_bind() {
-    assert_eq!(server_base(None, "0.0.0.0:8787"), "http://127.0.0.1:8787");
-    assert_eq!(server_base(None, "[::]:8787"), "http://[::1]:8787");
-    assert_eq!(server_base(None, "192.168.1.5:80"), "http://192.168.1.5:80");
-    assert_eq!(
-        server_base(Some("localhost:4268"), "x"),
-        "http://localhost:4268"
-    );
-    assert_eq!(server_base(Some("https://h/chat/"), "x"), "https://h/chat");
-    let a = parse("notify --server h:1").unwrap().unwrap();
-    assert_eq!((a.cmd, a.server.as_deref()), (Cmd::Notify, Some("h:1")));
-    assert!(parse("notify").unwrap().is_some());
-    assert!(parse("notify k3f").is_err());
-    assert!(parse("notify --all").is_err());
-    assert!(parse("batch --server h:1 q").is_err());
-}
-
-#[test]
 fn get_all_args() {
     let a = parse("get --all").unwrap().unwrap();
     assert!(a.all && a.words.is_empty());

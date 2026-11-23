@@ -32,8 +32,12 @@
 - llmjob stdin only via explicit `-m -` (implicit read bites in loops/cron).
   `-c` always takes a value so it can't swallow the message text. `last` is an
   id ref file, not a symlink/copy (UI renames/moves would break a symlink).
-- one fetcher: the server's batch poller also fetches llmjob jobs (startup scan
-  + `llmjob notify`). Chatport batches need no outside fetcher: the startup scan
-  catches them. A CLI fetcher of chatport batches was rejected: the
-  save-once lock is in-process only. Notify is a separate command, not
-  automatic on `batch`. Server down → `llmjob get` / `get --all` by hand.
+- one fetcher: the server's batch poller also fetches llmjob jobs. Chatport
+  batches need no outside fetcher (startup scan). A CLI fetcher of chatport
+  batches was rejected: the save-once lock is in-process only. New CLI jobs
+  reach the server by an inotify watch on `jobs/pending/` (`inotify` crate:
+  Linux only, thin, tokio stream; `notify` crate's cross-platform layer not
+  needed): no idle wake-ups, no HTTP/address/auth in the CLI. Tried before:
+  an explicit `llmjob notify` over HTTP (dropped); polling the folder
+  (rejected: idle wake-ups). CLI and server share a machine, so inotify sees
+  the writes. Server down → `llmjob get` / `get --all` by hand.

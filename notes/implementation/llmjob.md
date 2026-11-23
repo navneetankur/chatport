@@ -32,7 +32,10 @@
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
 - `get --all`: checks every unfetched job once, caches finished ones (no
   outputs written), updates statuses for `ls`. Exit 2 if any still running, 1
-  if a check failed. Manual or cron use; see also `notify`.
+  if a check failed. Manual or cron use, e.g. while the server is down.
+- `ls` local jobs (status as of the last check).
+- a running chatport server fetches jobs by itself: it watches `pending/` with
+  inotify (new jobs scheduled at once) and scans it at startup. batch.md.
 - `ls` local jobs (status as of the last check).
 - `notify [--server ADDR]`: asks a running chatport server to rescan the jobs
   folder (`POST api/llmjob/rescan`, Basic auth from config) and auto-fetch every

@@ -340,6 +340,20 @@ pub(crate) fn unfetched(data_dir: &Path) -> Result<Vec<(String, u64)>> {
         .collect());
 }
 
+/// The `pending/` folder (created if missing), for the server's watcher.
+pub(crate) fn pending_dir(data_dir: &Path) -> Result<PathBuf> {
+    return Ok(Jobs::open(data_dir)?.pending);
+}
+
+/// created_at of `short` if it is still in `pending/` and not fetched.
+pub(crate) fn pending_created_at(data_dir: &Path, short: &str) -> Result<Option<u64>> {
+    let jobs = Jobs::open(data_dir)?;
+    if !jobs.pending_rec(short).exists() || jobs.results(short).exists() {
+        return Ok(None);
+    }
+    return Ok(Some(jobs.load(short)?.created_at));
+}
+
 /// Server poller: one check of job `short`. Some(created_at) = still running,
 /// check again later; None = nothing left to do (fetched, removed or gone).
 pub(crate) async fn poll_once(
