@@ -93,6 +93,32 @@ fn pin_and_hide() {
 }
 
 #[test]
+fn reattach_keeps_pin_and_pin_is_not_a_use() {
+    let d = tmp();
+    let s = Attachments::open(&d).unwrap();
+    let (mut a, mut b) = (att("a.md", "A"), att("b.md", "B"));
+    s.save(&mut a, "c", "C").unwrap();
+    s.save(&mut b, "c", "C").unwrap();
+    let ha = a.hash.clone().unwrap();
+    s.pin(&ha).unwrap();
+    // Re-attached directly (content, no hash): still pinned, newer chat name.
+    let mut again = att("a.md", "A");
+    s.save(&mut again, "c2", "Other").unwrap();
+    let p = s.picker().unwrap();
+    assert_eq!(names(&p.pinned), ["a.md"]);
+    assert_eq!(p.pinned[0].chat_name.as_deref(), Some("Other"));
+    // Unpin keeps `at`: b was not used since, so a (re-attached later) stays first.
+    s.unpin(&ha).unwrap();
+    assert_eq!(names(&s.picker().unwrap().recent), ["a.md", "b.md"]);
+    // No-op restates append nothing.
+    let n = s.lines().unwrap().len();
+    s.unpin(&ha).unwrap();
+    assert_eq!(s.lines().unwrap().len(), n);
+    assert!(s.unpin(&"0".repeat(64)).is_err());
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+#[test]
 fn compact_keeps_newest_line_per_kept_hash() {
     let e = |h: &str, n: &str| Entry {
         hash: h.into(),
@@ -102,6 +128,7 @@ fn compact_keeps_newest_line_per_kept_hash() {
         chat: None,
         chat_name: None,
         path: None,
+        pinned: false,
         hidden: false,
     };
     let lines = [e("x", "1"), e("y", "2"), e("x", "3"), e("z", "4")];

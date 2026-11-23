@@ -78,7 +78,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [ ] Web tools + file tools: server-tool limits reset each tool round; cap total `web_searches` across the loop if it ever matters.
 - [ ] Nice-to-have: per-group system prompt addendum (`<group>/group.json`).
 - [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.
-- [x] Attachment blobs: `attachments/<sha256>` + `attachments.jsonl` use log + `pinned.json`; 🗂 picker (pin/hide/filter); `chatport gc [--delete]`.
+- [x] Attachment blobs: `attachments/<sha256>` + `attachments.jsonl` log (pin/hide are lines too); 🗂 picker (pin/hide/filter); `chatport gc [--delete]`.
 - [ ] Attachment picker: not yet clicked through in a browser (API live-tested via curl).
 - [x] User messages render markdown too (shared `content` snippet in App.svelte, same `</>` raw toggle as replies).
 
@@ -95,7 +95,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Per-conversation folder: `meta.json` (mutable) + `messages.jsonl` (append-only). Leaf lives in meta.json, not as JSONL records.
 - No index.json: list = scan `meta.json` files.
 - Branching = message tree via `parent_id` in one file (not file-per-branch).
-- Attachments: text/md only. Was inline in the message; now content-addressed blobs (`attachments/<sha256>`), message keeps `{name, hash, size}`. Old inline messages still load. Picker data = append-only `attachments.jsonl` (newest line per hash wins), not an index; pins in `pinned.json`. No automatic deletion: `chatport gc` (dry run by default) with a loud 1 h mtime grace.
+- Attachments: text/md only. Was inline in the message; now content-addressed blobs (`attachments/<sha256>`), message keeps `{name, hash, size}`. Old inline messages still load. Picker data = append-only `attachments.jsonl`, not an index. Every line carries the full state (`pinned`, `hidden`), so the newest line per hash is the truth; a re-attach copies `pinned` from the previous newest line (log read only when the blob already existed) and clears `hidden`. Pins were in `pinned.json` for a few hours; dropped, not migrated. No automatic deletion: `chatport gc` (dry run by default) with a loud 1 h mtime grace.
 - App attribution headers on every request, created hidden (no public rankings).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
@@ -146,3 +146,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 .
 - 2026-11-23: Cost check (gpt-4o-mini, 1 search + 1 fetch): response gives only `cost` and `cost_details.upstream_inference_cost`; tool fee = difference ($0.008), not split. Fetched/search text counts as normal prompt tokens (11k). `/generation` (lags a few s) adds `num_search_results`, `num_fetches`, still one total. Added `{}` raw chunk view (last reply, memory only). Live: 58 deltas skipped, 7 raw chunks (5 annotations, finish_reason, usage). 51 tests pass.
 - 2026-11-23: Attachment blobs (`src/attachments.rs`). Send: `Attachments::save` hashes content (or loads it for a hash-only pick), writes/touches the blob, appends a log line (chat id + title, `@` path); `Store::append` strips content of hashed attachments. Load: `api::load_messages` hydrates; a gone blob → `missing: true` + error log, and send/regenerate on that path → 422 naming the file. Picker API: `GET /api/attachments` `{pinned, recent}`, `POST|DELETE …/{hash}/pin`, `POST …/{hash}/hide` (log line; re-attach un-hides; hiding unpins). `chatport gc [--delete]`: live = hashes in all messages + pins; blobs under 1 h skipped and printed; `--delete` removes orphans and compacts the log (newest line per kept hash; bytes appended meanwhile are copied over). Live (openrouter/free): same file in 2 chats → 1 blob, model saw content; hash-only pick + `@` file; pin/hide; missing blob → 422; gc dry run and delete. UI (🗂 next to 📎) svelte-check clean, not clicked through.
+- 2026-11-23: `pinned.json` removed: pin/unpin/hide append a copy of the newest line with the flag changed (keeping `at`, so not a use; no-op changes append nothing). Picker sorts by `at`. gc treats pinned-in-newest-line as live. Live: pin, then direct re-attach with content → still pinned.

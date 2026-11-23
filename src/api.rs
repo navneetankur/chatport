@@ -106,8 +106,10 @@ async fn attachment_pin(State(s): St, Path(hash): Path<String>) -> R<Json<Value>
 }
 
 async fn attachment_unpin(State(s): St, Path(hash): Path<String>) -> R<Json<Value>> {
-    let was = s.attachments.unpin(&hash)?;
-    Ok(Json(json!({ "unpinned": was })))
+    s.attachments
+        .unpin(&hash)
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(Json(json!({ "pinned": false })))
 }
 
 async fn attachment_hide(State(s): St, Path(hash): Path<String>) -> R<Json<Value>> {

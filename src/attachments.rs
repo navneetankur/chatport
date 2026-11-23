@@ -1,13 +1,14 @@
 //! Attachment blobs, shared by all chats.
 //!
 //! data_dir/attachments/<sha256>   content, written once, never modified
-//! data_dir/attachments.jsonl      append-only use log (one line per attach, or a hide)
-//! data_dir/pinned.json            pinned picker entries, newest pin first
+//! data_dir/attachments.jsonl      append-only log: one line per attach, pin, unpin or hide
 //!
 //! Messages store `{name, hash, size}`; the content is filled back in when a
 //! chat is loaded. Old messages with inline `content` and no hash keep working.
-//! The picker reads the log from the end: the newest line per hash wins, so a
-//! re-attach moves a file to the top and un-hides it. Re-attaching touches the
+//! Every line carries the full state of its hash, so the newest line per hash
+//! is the truth: a re-attach copies `pinned` from the previous newest line and
+//! clears `hidden`; pin/unpin/hide append a copy of the newest line with the
+//! flag changed (keeping `at`, so they don't count as a use). Re-attaching touches the
 //! blob's mtime, which `gc` uses as a grace period for blobs written moments
 //! before their message is appended.
 
@@ -43,22 +44,24 @@ pub struct Entry {
     /// Server path for `@path` files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// Hide marker: drops the hash from the picker until it is attached again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    /// Dropped from the picker until attached again.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Picker {
+    /// Most recently used first.
     pub pinned: Vec<Entry>,
-    /// Newest first, pinned and hidden ones left out.
+    /// Most recently used first; pinned and hidden ones left out.
     pub recent: Vec<Entry>,
 }
 
 pub struct Attachments {
     dir: PathBuf,
     log: PathBuf,
-    pinned: PathBuf,
     lock: Mutex<()>,
 }
 
@@ -91,18 +94,16 @@ fn parse_log(text: &str, path: &Path) -> Vec<Entry> {
         .collect()
 }
 
-/// Newest line per hash, newest first. Hidden hashes and `skip` are left out.
-fn latest(lines: &[Entry], skip: &HashSet<&str>) -> Vec<Entry> {
+/// Newest line per hash, most recently used first.
+fn latest(lines: &[Entry]) -> Vec<Entry> {
     let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for e in lines.iter().rev() {
-        if !seen.insert(e.hash.as_str()) {
-            continue;
-        }
-        if !e.hidden && !skip.contains(e.hash.as_str()) {
-            out.push(e.clone());
-        }
-    }
+    let mut out: Vec<Entry> = lines
+        .iter()
+        .rev()
+        .filter(|e| seen.insert(e.hash.as_str()))
+        .cloned()
+        .collect();
+    out.sort_by_key(|e| std::cmp::Reverse(e.at));
     return out;
 }
 
@@ -135,7 +136,6 @@ impl Attachments {
         return Ok(Self {
             dir,
             log: data_dir.join("attachments.jsonl"),
-            pinned: data_dir.join("pinned.json"),
             lock: Mutex::new(()),
         });
     }
@@ -168,7 +168,9 @@ impl Attachments {
         let hash = hash_of(&a.content);
         let p = self.blob(&hash);
         let _g = self.lock.lock().unwrap();
+        let mut pinned = false;
         if p.exists() {
+            pinned = self.newest(&hash)?.is_some_and(|e| e.pinned);
             // Fresh mtime keeps gc's grace period meaning "recently used".
             std::fs::File::options()
                 .write(true)
@@ -197,6 +199,7 @@ impl Attachments {
             chat: Some(chat.to_string()),
             chat_name: Some(chat_name.to_string()),
             path: a.path.clone(),
+            pinned,
             hidden: false,
         })?;
         return Ok(());
@@ -240,86 +243,58 @@ impl Attachments {
         }
     }
 
-    fn read_pinned(&self) -> Result<Vec<Entry>> {
-        match std::fs::read(&self.pinned) {
-            Ok(b) => serde_json::from_slice(&b)
-                .with_context(|| format!("parsing {}", self.pinned.display())),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
-            Err(e) => Err(e).with_context(|| format!("reading {}", self.pinned.display())),
-        }
-    }
-
-    fn write_pinned(&self, list: &[Entry]) -> Result<()> {
-        let tmp = self.pinned.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(list)?)
-            .with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.pinned)
-            .with_context(|| format!("renaming to {}", self.pinned.display()))?;
-        return Ok(());
+    /// Newest line for `hash`, if any.
+    fn newest(&self, hash: &str) -> Result<Option<Entry>> {
+        Ok(self.lines()?.into_iter().rev().find(|e| e.hash == hash))
     }
 
     pub fn picker(&self) -> Result<Picker> {
-        let pinned = self.read_pinned()?;
-        let skip: HashSet<&str> = pinned.iter().map(|e| e.hash.as_str()).collect();
-        let recent = latest(&self.lines()?, &skip)
-            .into_iter()
-            .filter(|e| self.blob(&e.hash).exists())
-            .collect();
+        let (mut pinned, mut recent) = (Vec::new(), Vec::new());
+        for e in latest(&self.lines()?) {
+            if e.hidden || !self.blob(&e.hash).exists() {
+                continue;
+            }
+            if e.pinned { &mut pinned } else { &mut recent }.push(e);
+        }
         return Ok(Picker { pinned, recent });
     }
 
-    /// Pins `hash` with its newest log entry. Already pinned is fine.
-    pub fn pin(&self, hash: &str) -> Result<()> {
+    /// Appends a copy of the newest line for `hash` with `change` applied,
+    /// unless that changes nothing. Err for a hash never attached.
+    fn restate(&self, hash: &str, change: impl FnOnce(&mut Entry)) -> Result<()> {
         let _g = self.lock.lock().unwrap();
-        let mut list = self.read_pinned()?;
-        if list.iter().any(|e| e.hash == hash) {
-            return Ok(());
-        }
-        let Some(e) = self
-            .lines()?
-            .into_iter()
-            .rev()
-            .find(|e| e.hash == hash && !e.hidden)
-        else {
+        let Some(old) = self.newest(hash)? else {
             bail!("unknown attachment {hash}");
         };
-        list.insert(0, e);
-        return self.write_pinned(&list);
+        let mut e = old.clone();
+        change(&mut e);
+        if e == old {
+            return Ok(());
+        }
+        return self.append(&e);
     }
 
-    /// Unpins `hash`. Returns whether it was pinned.
-    pub fn unpin(&self, hash: &str) -> Result<bool> {
-        let _g = self.lock.lock().unwrap();
-        let mut list = self.read_pinned()?;
-        let n = list.len();
-        list.retain(|e| e.hash != hash);
-        if list.len() == n {
-            return Ok(false);
-        }
-        self.write_pinned(&list)?;
-        return Ok(true);
+    /// Pinning a hidden file un-hides it.
+    pub fn pin(&self, hash: &str) -> Result<()> {
+        self.restate(hash, |e| {
+            e.pinned = true;
+            e.hidden = false;
+        })
+    }
+
+    pub fn unpin(&self, hash: &str) -> Result<()> {
+        self.restate(hash, |e| e.pinned = false)
     }
 
     /// Drops `hash` from the picker (unpinning it too) until it is attached again.
     pub fn hide(&self, hash: &str) -> Result<()> {
-        if !valid_hash(hash) {
-            bail!("invalid attachment hash {hash:?}");
-        }
-        self.unpin(hash)?;
-        let _g = self.lock.lock().unwrap();
-        return self.append(&Entry {
-            hash: hash.to_string(),
-            name: String::new(),
-            size: 0,
-            at: now_ms(),
-            chat: None,
-            chat_name: None,
-            path: None,
-            hidden: true,
-        });
+        self.restate(hash, |e| {
+            e.pinned = false;
+            e.hidden = true;
+        })
     }
 
-    /// Lists orphan blobs (no message or pin refers to them); with `delete`,
+    /// Lists orphan blobs (no message refers to them, not pinned); with `delete`,
     /// removes them and compacts the log. Prints a report to stdout.
     pub fn gc(&self, store: &Store, delete: bool) -> Result<()> {
         let mut live: HashSet<String> = HashSet::new();
@@ -328,7 +303,12 @@ impl Attachments {
                 live.extend(m.attachments.into_iter().filter_map(|a| a.hash));
             }
         }
-        live.extend(self.read_pinned()?.into_iter().map(|e| e.hash));
+        live.extend(
+            latest(&self.lines()?)
+                .into_iter()
+                .filter(|e| e.pinned)
+                .map(|e| e.hash),
+        );
 
         let now = SystemTime::now();
         let (mut orphans, mut orphan_bytes, mut skipped, mut kept) =
