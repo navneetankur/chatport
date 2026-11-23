@@ -484,15 +484,25 @@
     downloadText(`${slug(current?.title ?? '')}-${m.id}.md`, m.content);
   }
 
-  onMount(async () => {
+  /** Shows what the URL hash names: `#<id>` a chat, `#g/<name>` a group. */
+  async function route() {
+    const h = location.hash.slice(1);
     try {
-      await refreshList();
-      const id = location.hash.slice(1);
-      if (id.startsWith('g/')) openGroup(decodeURIComponent(id.slice(2)));
-      else if (id) await open(id);
+      if (h.startsWith('g/')) {
+        const g = decodeURIComponent(h.slice(2));
+        if (viewGroup !== g || current) openGroup(g);
+      } else if (h && current?.id !== h) {
+        await open(h);
+      }
     } catch (e) {
       error = String(e);
     }
+  }
+
+  onMount(() => {
+    window.addEventListener('hashchange', route);
+    refreshList().then(route, (e) => (error = String(e)));
+    return () => window.removeEventListener('hashchange', route);
   });
 </script>
 
@@ -516,7 +526,7 @@
             }}
           />
         {:else}
-          <button class="title" onclick={() => open(c.id)} ondblclick={() => startRename(c)}>{c.title}</button>
+          <a class="title" href="#{c.id}" ondblclick={() => startRename(c)}>{c.title}</a>
           {#if rowMenu === 'c:' + c.id}
             <button class="del" title="Move to group" onclick={() => { rowMenu = null; moveChat(c); }}>⇄</button>
             <button class="del" title="Rename" onclick={() => { rowMenu = null; startRename(c); }}>✎</button>
@@ -531,7 +541,7 @@
         {@const open_ = expanded.includes(g)}
         <li class="group" class:active={viewGroup === g}>
           <button class="tog" title={open_ ? 'Collapse' : 'Expand'} onclick={() => toggleGroup(g)}>{open_ ? '▾' : '▸'}</button>
-          <button class="title" onclick={() => openGroup(g)}>{g} <span class="count">{chats.length}</span></button>
+          <a class="title" href="#g/{encodeURIComponent(g)}">{g} <span class="count">{chats.length}</span></a>
           {#if rowMenu === 'g:' + g}
             <button class="del" title="Rename group" onclick={() => { rowMenu = null; renameGroupUi(g); }}>✎</button>
             <button class="del" title="Delete group" onclick={() => { rowMenu = null; deletingGroup = deletingGroup === g ? null : g; }}>×</button>
@@ -592,7 +602,7 @@
         <div class="gview">
           <ul>
             {#each groups.get(viewGroup) ?? [] as c (c.id)}
-              <li><button class="title" onclick={() => open(c.id)}>{c.title}</button></li>
+              <li><a class="title" href="#{c.id}">{c.title}</a></li>
             {/each}
           </ul>
           <p class="hint">Send a message below to start a new chat in this group.</p>
@@ -808,6 +818,8 @@
   li.active { background: #8882; }
   .title {
     flex: 1;
+    display: block;
+    text-decoration: none;
     text-align: left;
     background: none;
     border: none;
