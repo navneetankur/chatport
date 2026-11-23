@@ -243,5 +243,9 @@
   small { color: #888; }
   .warn { color: #c84; }
   .err { color: #c44; }
-  .actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .actions {
+    display: flex; justify-content: flex-end; gap: 8px;
+    position: sticky; bottom: -12px; margin: 0 -16px -12px; padding: 8px 16px;
+    background: var(--bg); border-top: 1px solid #8884;
+  }
 </style>
