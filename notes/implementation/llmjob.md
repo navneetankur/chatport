@@ -1,0 +1,32 @@
+# llmjob (`src/llmjob.rs`, `src/llmjob/{compose,jobs}.rs`, `src/bin/llmjob.rs`)
+
+- same config, keys and data_dir as the server. Hand-rolled arg parsing (no
+  clap); options may go before or after the command. `llmjob --help`.
+- message = profile `msg` files + `-m` files + TEXT (batch: + the `--dir` file),
+  each trimmed at the end, empty ones skipped, joined by a blank line.
+  `--headers` / profile `headers` wrap files in `<file name="…">`. System =
+  profile `system` + `-s` files, no headers; all empty → no system message.
+  `-m -` = stdin (once).
+- profiles `[profile.NAME]`: model, effort, key, system, msg, headers, provider.
+  `-p NAME`; `default` used when present. Relative paths against the config
+  file's folder. `--model` / `--effort` override.
+- `run`: streams to stdout; stored as a chatport conversation. Unsaved → one-chat
+  scratch store `data_dir/llmjob/scratch/` (replaced by the next unsaved run);
+  `--save` / `keep` → `conversations/llmjob/` (Store::adopt). Shown id = last 6
+  chars (random part of uuid v7); lookup by prefix or suffix.
+- `-c ID|last`: `data_dir/llmjob/last` holds the last run's conversation id.
+  Continue keeps the stored system prompt (`-s` is an error), skips profile
+  system/msg; explicit `-p`/`--model`/`--effort` update the conversation.
+  `--save` with `-c` on a scratch chat keeps it. Batch models refused.
+- `batch [--dir DIR]`: one request per regular non-hidden file (sorted), or one
+  without `--dir` (named `output`). `:batch` appended to the model if missing.
+  Prints a 3-char job id. Record `data_dir/llmjob/jobs/<id>.json`; custom_id sent
+  is `r<i>` (Anthropic allows only `[A-Za-z0-9_-]`), file names stay in the record.
+- `get ID|last [--dir OUT] [--wait]`: exit 2 + status on stderr while running
+  (`--wait` polls every 60 s). Finished: raw batch cached as
+  `jobs/<id>.results.json`, upstream deleted, so `get` repeats offline. Without
+  `--dir` only one-request jobs (stdout); with it `OUT/<name>`, errors in
+  `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
+- `ls` local jobs; `rm` deletes upstream (refused while running: no cancel) + local.
+- live-tested 2026-11-23 with `openrouter/free`: run, `-c last`, `-m -`, keep,
+  `--save`, `-c <suffix> --effort low`.
