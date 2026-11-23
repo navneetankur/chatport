@@ -55,6 +55,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/models", get(models))
         .route("/api/keys", get(keys))
+        .route("/api/recent-models", get(recent_models))
         .route("/api/file", get(file))
         .route("/api/ls", get(ls))
         .route("/api/conversations", get(list).post(create))
@@ -86,6 +87,18 @@ async fn models(State(s): St) -> R<Json<Value>> {
 }
 
 /// Key names only, never the keys themselves.
+/// Model ids the user picked, newest first.
+async fn recent_models(State(s): St) -> Json<Vec<String>> {
+    Json(s.recent.models())
+}
+
+/// Records the picked model; a failure only costs the recent list, not the send.
+fn note_model(s: &AppState, model: &str) {
+    if let Err(e) = s.recent.record(model) {
+        log::warn!("recording recent model {model}: {e:#}");
+    }
+}
+
 async fn keys(State(s): St) -> Json<Value> {
     Json(json!({ "names": s.config.key_names(), "default": s.config.default_key }))
 }
@@ -190,7 +203,10 @@ async fn create(State(s): St, body: Option<Json<CreateReq>>) -> R<Json<Meta>> {
         title: r.title.unwrap_or_else(|| DEFAULT_TITLE.into()),
         created_at: now,
         updated_at: now,
-        model: r.model.unwrap_or_else(|| s.config.default_model.clone()),
+        model: r
+            .model
+            .or_else(|| s.recent.latest())
+            .unwrap_or_else(|| s.config.default_model.clone()),
         provider: Some(with_data_collection_default(
             r.provider.or_else(|| s.config.default_provider.clone()),
         )),
@@ -417,6 +433,7 @@ async fn send(State(s): St, Path(id): Path<String>, Json(r): Json<SendReq>) -> R
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
     msgs.push(user.clone());
+    note_model(&s, &meta.model);
     if is_batch_model(&meta.model) {
         return Ok(batch::submit(s, meta, msgs, user, true).into_response());
     }
@@ -438,6 +455,7 @@ async fn regenerate(State(s): St, Path(id): Path<String>, Json(r): Json<RegenReq
         Some(_) => return Err(bad("user_id must be a user message")),
         None => return Err(bad("unknown user_id")),
     };
+    note_model(&s, &meta.model);
     if is_batch_model(&meta.model) {
         return Ok(batch::submit(s, meta, msgs, user, false).into_response());
     }

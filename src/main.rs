@@ -7,6 +7,7 @@ mod config;
 mod files;
 mod listen;
 mod provider;
+mod recent;
 mod store;
 mod tools;
 mod tree;
@@ -18,6 +19,8 @@ use std::sync::Arc;
 
 pub struct AppState {
     pub store: store::Store,
+    /// Recently picked models (state.json).
+    pub recent: recent::Recent,
     pub provider: Arc<dyn provider::Provider>,
     pub config: config::Config,
     /// In-flight generations: conv id -> (generation id, cancel sender).
@@ -110,8 +113,10 @@ async fn run(act: listen::Activation) -> Result<()> {
         cfg.default_key.as_deref().unwrap_or_default()
     );
     let store = store::Store::open(config::expand_tilde(&cfg.data_dir))?;
+    let recent = recent::Recent::open(config::expand_tilde(&cfg.data_dir))?;
     let state = Arc::new(AppState {
         store,
+        recent,
         provider: Arc::new(provider::openrouter::OpenRouter::new(
             cfg.key_for(None)?.to_string(),
         )?),

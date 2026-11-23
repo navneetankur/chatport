@@ -6,32 +6,62 @@
     models,
     value = $bindable(),
     price,
-  }: { models: ModelInfo[]; value: string; price: (m: ModelInfo) => string } = $props();
+    recent = [],
+    onpick,
+  }: {
+    models: ModelInfo[];
+    value: string;
+    price: (m: ModelInfo) => string;
+    /** Recently picked ids, newest first: listed on top until the user types. */
+    recent?: string[];
+    /** Called after a pick from the list (not on typing). */
+    onpick?: (id: string) => void;
+  } = $props();
 
   const LIMIT = 100;
   let open = $state(false);
   let active = $state(0);
   let listEl = $state<HTMLUListElement>();
 
-  const hits = $derived(searchModels(models, value));
+  /** False until the user types; then the list is search results. */
+  let typed = $state(false);
+
+  /** Recent ids as entries; ids missing from the catalog still show. */
+  const recentInfos = $derived(
+    recent.map((id) => models.find((m) => m.id === id) ?? { id, name: '(not in model list)' }),
+  );
+  const hits = $derived(
+    typed
+      ? searchModels(models, value)
+      : [...recentInfos, ...models.filter((m) => !recent.includes(m.id))],
+  );
   const shown = $derived(hits.slice(0, LIMIT));
+  const nRecent = $derived(typed ? 0 : Math.min(recentInfos.length, LIMIT));
 
   function pick(m: ModelInfo) {
     value = m.id;
     open = false;
+    typed = false;
+    onpick?.(m.id);
+  }
+
+  function show() {
+    open = true;
+    typed = false;
+    active = 0;
   }
 
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (!open) {
-        open = true;
+        show();
         return;
       }
       const n = shown.length;
       if (!n) return;
       active = (active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
-      listEl?.children[active]?.scrollIntoView({ block: 'nearest' });
+      listEl?.querySelectorAll('[role=option]')[active]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter' && open && shown[active]) {
       e.preventDefault();
       pick(shown[active]);
@@ -48,10 +78,11 @@
     placeholder="vendor/model, or words: gemini flash"
     autocomplete="off"
     spellcheck="false"
-    onfocus={() => (open = true)}
+    onfocus={show}
     onblur={() => (open = false)}
     oninput={() => {
       open = true;
+      typed = true;
       active = 0;
     }}
     {onkeydown}
@@ -59,6 +90,8 @@
   {#if open && shown.length}
     <ul bind:this={listEl} role="listbox">
       {#each shown as m, i (m.id)}
+        {#if i === 0 && nRecent}<li class="sep" role="presentation">Recent</li>{/if}
+        {#if i === nRecent && nRecent && i < shown.length}<li class="sep" role="presentation">All models</li>{/if}
         <!-- mousedown + preventDefault keeps focus in the input so blur doesn't close first -->
         <li
           role="option"
@@ -71,7 +104,7 @@
           onmouseenter={() => (active = i)}
         >
           <span class="id">{m.id}</span>
-          <span class="meta">{m.name} · {price(m)}</span>
+          <span class="meta">{m.name}{price(m) ? ` · ${price(m)}` : ''}</span>
         </li>
       {/each}
       {#if hits.length > LIMIT}
@@ -106,4 +139,5 @@
   .id { font-family: ui-monospace, monospace; font-size: 0.9em; }
   .meta, .more { color: #888; font-size: 0.8em; }
   .more { cursor: default; }
+  .sep { cursor: default; color: #888; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 6px; }
 </style>

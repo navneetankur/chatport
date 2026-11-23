@@ -231,6 +231,9 @@ export function listModels(): Promise<ModelInfo[]> {
   return modelsCache;
 }
 
+/** Model ids the user picked, newest first. Fresh on every call. */
+export const recentModels = () => fetch('api/recent-models').then((r) => json<string[]>(r));
+
 export const listKeys = () =>
   fetch('api/keys').then((r) => json<{ names: string[]; default: string }>(r));
 

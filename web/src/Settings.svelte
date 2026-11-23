@@ -23,6 +23,7 @@
   let tools = $state(init.tools ?? false);
   let keys = $state<{ names: string[]; default: string }>({ names: [], default: '' });
   let models = $state<ModelInfo[]>([]);
+  let recent = $state<string[]>([]);
   let error = $state('');
   let saving = $state(false);
 
@@ -84,6 +85,7 @@
   }
 
   onMount(async () => {
+    api.recentModels().then((r) => (recent = r), () => {});
     api.listKeys().then((k) => (keys = k), (e) => (error = `Loading keys: ${e}`));
     try {
       models = (await api.listModels()).sort((a, b) => a.id.localeCompare(b.id));
@@ -96,7 +98,7 @@
 <div class="panel">
   <label>
     Model
-    <ModelPicker {models} bind:value={model} {price} />
+    <ModelPicker {models} {recent} bind:value={model} {price} />
     {#if selected}
       <small>{selected.name} · {selected.context_length ?? '?'} ctx · {price(selected)}</small>
     {:else if models.length && model}
