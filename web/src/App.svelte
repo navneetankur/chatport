@@ -7,6 +7,8 @@
   import { codeCopy, copyWithFeedback, downloadText, openHtml, openText } from './clipboard';
   import Settings from './Settings.svelte';
   import MessageInput from './MessageInput.svelte';
+  import ModelPicker from './ModelPicker.svelte';
+  import type { ModelInfo } from './api';
 
   let convs = $state<Summary[]>([]);
   /** Group shown in the main pane (no chat open). */
@@ -143,6 +145,53 @@
     leaf = null;
     location.hash = m.id;
     await refreshList();
+  }
+
+  /** Changes the open chat's settings; a draft only changes locally. */
+  async function applyMeta(patch: api.MetaPatch) {
+    if (!current) return;
+    if (isDraft) {
+      current = { ...current, ...patch } as Meta;
+      return;
+    }
+    await act(async () => {
+      const m = await api.patchConversation(current!.id, patch);
+      if (current?.id === m.id) current = m;
+      await refreshList();
+    });
+  }
+
+  // Header: double-click the title to rename, click the model to change it.
+  let editTitle = $state<string | null>(null);
+  let editModel = $state<string | null>(null);
+  let models = $state<ModelInfo[]>([]);
+  let recent = $state<string[]>([]);
+
+  function startModelEdit() {
+    if (!current) return;
+    editModel = current.model;
+    api.listModels().then(
+      (m) => (models = [...m].sort((a, b) => a.id.localeCompare(b.id))),
+      (e) => (error = `Loading models: ${e}`),
+    );
+    api.recentModels().then((r) => (recent = r), () => {});
+  }
+
+  function submitTitle() {
+    const t = editTitle?.trim();
+    editTitle = null;
+    if (t && t !== current?.title) applyMeta({ title: t });
+  }
+
+  function focusIn(el: HTMLElement) {
+    el.querySelector('input')?.focus();
+  }
+
+  function price(m: ModelInfo): string {
+    const p = Number(m.pricing?.prompt ?? NaN) * 1e6;
+    const c = Number(m.pricing?.completion ?? NaN) * 1e6;
+    if (isNaN(p) || isNaN(c)) return '';
+    return p === 0 && c === 0 ? 'free' : `$${p.toFixed(2)} / $${c.toFixed(2)} per Mtok`;
   }
 
   let renaming = $state<string | null>(null);
@@ -601,7 +650,51 @@
     <header>
       <button class="menu" title="Chats" onclick={() => (showSidebar = !showSidebar)}>☰</button>
       <span class="htitle">
-        {current ? `${current.title} — ${current.model}` : viewGroup ? `Group: ${viewGroup}` : 'chatport'}
+        {#if current}
+          {#if editTitle !== null}
+            <input
+              class="hedit"
+              bind:value={editTitle}
+              use:focus
+              onblur={submitTitle}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') submitTitle();
+                else if (e.key === 'Escape') editTitle = null;
+              }}
+            />
+          {:else}
+            <span class="hname" role="button" tabindex="-1" title="Double-click to rename" ondblclick={() => (editTitle = current!.title)}>{current.title}</span>
+          {/if}
+          —
+          {#if editModel !== null}
+            <span
+              class="hpick"
+              role="presentation"
+              use:focusIn
+              onfocusout={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) editModel = null;
+              }}
+              onkeydown={(e) => {
+                if (e.key === 'Escape') editModel = null;
+              }}
+            >
+              <ModelPicker
+                {models}
+                {recent}
+                {price}
+                bind:value={editModel}
+                onpick={(id) => {
+                  editModel = null;
+                  if (id !== current?.model) applyMeta({ model: id });
+                }}
+              />
+            </span>
+          {:else}
+            <button class="hmodel" title="Change model" onclick={startModelEdit} disabled={busy}>{current.model} ▾</button>
+          {/if}
+        {:else}
+          {viewGroup ? `Group: ${viewGroup}` : 'chatport'}
+        {/if}
         {#if current?.reasoning_effort}
           <span class="effort" title="Reasoning effort">· {current.reasoning_effort} effort</span>
         {/if}
@@ -884,6 +977,15 @@
     gap: 12px;
   }
   .htitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .htitle:has(.hpick) { overflow: visible; }
+  .hname { cursor: text; }
+  .hedit { font: inherit; padding: 2px 6px; width: 16em; }
+  .hmodel { background: none; border: none; padding: 0 4px; font: inherit; font-weight: normal; color: inherit; }
+  .hmodel:hover:not(:disabled) { text-decoration: underline dotted; }
+  .hpick {
+    display: inline-block; width: min(28em, 60vw); vertical-align: middle;
+    font-weight: normal; position: relative; z-index: 15;
+  }
   .effort { font-weight: normal; color: #888; }
   .totals { font-weight: normal; font-size: 0.8em; color: #888; white-space: nowrap; }
   .gear { background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1em; }
