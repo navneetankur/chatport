@@ -9,6 +9,11 @@
 //! `[batch] poll_interval`. It depends only on `submitted_at`, so it survives
 //! restarts. Every pending batch is checked once at startup.
 //!
+//! llmjob batch jobs (`data_dir/llmjob/jobs/`) share the poller under keys
+//! `llmjob:<short>`: found by the startup scan, or announced by the CLI via
+//! `POST api/llmjob/{short}/poll` right after submit. Same gaps, by job age.
+//! A finished job is cached for `llmjob get`; nothing is written elsewhere.
+//!
 //! The poller sleeps until the earliest due check; `schedule`/`unschedule`
 //! wake it (`AppState.batch_wake`) so it re-reads the earliest time. With
 //! nothing pending it sleeps until the next submit.
@@ -36,7 +41,10 @@ const VISIBLE_AFTER: Duration = Duration::from_secs(120);
 /// First automatic check after submit.
 const FIRST_GAP: Duration = Duration::from_secs(300);
 
-/// Next automatic check per conversation with a pending batch.
+/// Poll-map key prefix of llmjob jobs (conversation ids are plain alphanumerics).
+const JOB_PREFIX: &str = "llmjob:";
+
+/// Next automatic check per conversation with a pending batch (or llmjob job).
 pub type Polls = Mutex<HashMap<String, Instant>>;
 
 /// Shared by everything that saves or rewrites a pending batch, so a reply is
@@ -288,6 +296,26 @@ pub async fn forget_handler(State(s): St, Path(id): Path<String>) -> R<Json<Valu
     Ok(Json(json!({ "upstream_deleted": deleted.is_ok() })))
 }
 
+fn age_since(created_at_ms: u64) -> Duration {
+    Duration::from_millis(now_ms().saturating_sub(created_at_ms))
+}
+
+fn data_dir(s: &AppState) -> std::path::PathBuf {
+    crate::config::expand_tilde(&s.config.data_dir)
+}
+
+/// `POST api/llmjob/{short}/poll`: llmjob just submitted this job; schedule it.
+pub async fn job_poll_handler(State(s): St, Path(short): Path<String>) -> R<Json<Value>> {
+    let created = crate::llmjob::jobs::created_at(&data_dir(&s), &short)
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    let gap = next_gap(age_since(created), s.config.batch.poll_interval);
+    schedule(&s, &format!("{JOB_PREFIX}{short}"), gap);
+    log::info!("llmjob {short}: scheduled, first check in {gap:?}");
+    Ok(Json(
+        json!({ "scheduled": !s.config.batch.poll_interval.is_zero() }),
+    ))
+}
+
 /// Starts the background poller unless `[batch] poll_interval` is 0.
 pub fn start_poller(s: Arc<AppState>) {
     let cap = s.config.batch.poll_interval;
@@ -326,6 +354,10 @@ fn scan(s: &AppState) -> Result<usize> {
             Err(e) => log::warn!("batch scan: {}: {e:#}", c.id),
         }
     }
+    for (short, _) in crate::llmjob::jobs::unfetched(&data_dir(s))? {
+        schedule(s, &format!("{JOB_PREFIX}{short}"), Duration::ZERO);
+        n += 1;
+    }
     return Ok(n);
 }
 
@@ -340,6 +372,10 @@ async fn poll_due(s: &Arc<AppState>, cap: Duration) {
         .map(|(id, _)| id.clone())
         .collect();
     for id in due {
+        if let Some(short) = id.strip_prefix(JOB_PREFIX) {
+            poll_job(s, &id, short, cap).await;
+            continue;
+        }
         match refresh(s, &id).await {
             Ok(Refreshed::Pending(p)) => {
                 let gap = next_gap(age_of(&p), cap);
@@ -354,6 +390,19 @@ async fn poll_due(s: &Arc<AppState>, cap: Duration) {
                 log::warn!("auto-poll {id}: {e:#}");
                 schedule(s, &id, cap.min(FIRST_GAP));
             }
+        }
+    }
+}
+
+async fn poll_job(s: &Arc<AppState>, key: &str, short: &str, cap: Duration) {
+    let r =
+        crate::llmjob::jobs::poll_once(&s.config, s.provider.as_ref(), &data_dir(s), short).await;
+    match r {
+        Ok(Some(created)) => schedule(s, key, next_gap(age_since(created), cap)),
+        Ok(None) => unschedule(s, key),
+        Err(e) => {
+            log::warn!("auto-poll {key}: {e:#}");
+            schedule(s, key, cap.min(FIRST_GAP));
         }
     }
 }

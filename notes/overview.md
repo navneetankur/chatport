@@ -42,7 +42,8 @@ demand. Rust (axum) backend, Svelte/TS frontend embedded in the binary. Plus
 - batch replies for `:batch` models, server auto-poll. batch.md
 - groups, draft chats, recent models, rename. frontend.md, storage.md
 - optional Basic auth, systemd socket activation. server.md
-- `llmjob run/keep/batch/get/ls/rm`, config profiles. llmjob.md
+- `llmjob run/keep/batch/get/ls/rm/notify`, config profiles; server poller
+  also fetches llmjob jobs. llmjob.md, batch.md
 
 ## build / run / test
 - `tools/build.sh [--release] [--force]`, `tools/run.sh`; `web/dist` must exist

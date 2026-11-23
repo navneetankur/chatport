@@ -9,7 +9,7 @@
 //! `data_dir/llmjob/last` holds the id of the conversation `-c last` means.
 
 mod compose;
-mod jobs;
+pub(crate) mod jobs;
 
 use crate::api::{context, record_model, title_from, with_data_collection_default};
 use crate::config::{self, Config, Profile};
@@ -39,6 +39,8 @@ usage:
   llmjob get   ID|last [--dir DIR] [--wait]                exit 2 while running
   llmjob get   --all                                       cache every finished job
   llmjob ls
+  llmjob notify ID|last...  |  --all [--server ADDR]   have a running chatport server
+                                                           auto-fetch these jobs
   llmjob rm    ID|last...  |  --all [--force]          delete jobs (local + upstream)
 
 options:
@@ -53,8 +55,10 @@ options:
       --dir DIR       batch: one request per file in DIR; get: write outputs there
       --wait          get: poll every minute until finished
       --all           get: check every unfetched job once, cache finished ones
+                      notify: every unfetched job
                       rm: every job (running ones are always skipped)
       --force         rm: also jobs finished upstream but never fetched
+      --server ADDR   notify: host:port or URL (default: config bind, 0.0.0.0 → 127.0.0.1)
       --config PATH   default ~/.config/chatport/config.toml
       --keyfile PATH  key for the default key name (else OPENROUTER_API_KEY, config)
 
@@ -70,6 +74,7 @@ enum Cmd {
     Get,
     Ls,
     Rm,
+    Notify,
 }
 
 #[derive(Debug)]
@@ -91,10 +96,11 @@ struct Args {
     wait: bool,
     all: bool,
     force: bool,
+    server: Option<String>,
 }
 
 /// Options that take a value (needed to find the command among leading options).
-const VALUE_OPTS: [&str; 13] = [
+const VALUE_OPTS: [&str; 14] = [
     "-s",
     "--system",
     "-m",
@@ -108,6 +114,7 @@ const VALUE_OPTS: [&str; 13] = [
     "--dir",
     "--config",
     "--keyfile",
+    "--server",
 ];
 
 /// Moves the command word to the front: options may come before it.
@@ -136,6 +143,7 @@ fn parse_args(argv: Vec<String>) -> Result<Option<Args>> {
         Some("get") => Cmd::Get,
         Some("ls") => Cmd::Ls,
         Some("rm") => Cmd::Rm,
+        Some("notify") => Cmd::Notify,
         None | Some("-h" | "--help" | "help") => return Ok(None),
         Some(other) if other.starts_with('-') => bail!("no command given (see llmjob --help)"),
         Some(other) => bail!("unknown command {other:?} (see llmjob --help)"),
@@ -157,6 +165,7 @@ fn parse_args(argv: Vec<String>) -> Result<Option<Args>> {
         wait: false,
         all: false,
         force: false,
+        server: None,
     };
     let mut flags_done = false;
     while let Some(arg) = it.next() {
@@ -185,6 +194,7 @@ fn parse_args(argv: Vec<String>) -> Result<Option<Args>> {
             "--wait" => a.wait = true,
             "--all" => a.all = true,
             "--force" => a.force = true,
+            "--server" => a.server = Some(val()?),
             "--config" => a.config = Some(PathBuf::from(val()?)),
             "--keyfile" => a.keyfile = Some(config::expand_tilde(&val()?)),
             "--key" => bail!("--key is not supported (visible in ps); use --keyfile PATH"),
@@ -201,10 +211,13 @@ fn check_args(a: &Args) -> Result<()> {
     let prompt = !a.system.is_empty() || !a.msg.is_empty() || a.headers;
     let model = a.profile.is_some() || a.model.is_some() || a.effort.is_some();
     let bad = |what: &str| bail!("{what} does not apply to `{:?}`", a.cmd);
+    if a.server.is_some() && a.cmd != Cmd::Notify {
+        return bad("--server");
+    }
     if a.force && a.cmd != Cmd::Rm {
         return bad("--force");
     }
-    if a.all && !matches!(a.cmd, Cmd::Rm | Cmd::Get) {
+    if a.all && !matches!(a.cmd, Cmd::Rm | Cmd::Get | Cmd::Notify) {
         return bad("--all");
     }
     match a.cmd {
@@ -232,7 +245,7 @@ fn check_args(a: &Args) -> Result<()> {
                 bail!("expected one job id (or `last`)");
             }
         }
-        Cmd::Rm => {
+        Cmd::Rm | Cmd::Notify => {
             if prompt || model || a.save || a.cont.is_some() || a.dir.is_some() || a.wait {
                 return bad("options");
             }
@@ -263,6 +276,8 @@ pub struct Ctx {
     pub provider: OpenRouter,
     /// Key name of the resolved profile (None = default key).
     pub key_name: Option<String>,
+    /// `--server`: where to announce new batch jobs.
+    server: Option<String>,
 }
 
 /// Entry point of the `llmjob` binary. Returns the exit code.
@@ -311,6 +326,7 @@ async fn dispatch(a: Args) -> Result<i32> {
         data_dir: config::expand_tilde(&cfg.data_dir),
         provider: OpenRouter::new(cfg.key_for(None)?.to_string())?,
         key_name: profile.key.clone(),
+        server: a.server.clone(),
         config: cfg,
     };
     return match a.cmd {
@@ -321,7 +337,51 @@ async fn dispatch(a: Args) -> Result<i32> {
         Cmd::Get => jobs::get(&ctx, &a.words[0], a.dir.as_deref(), a.wait).await,
         Cmd::Ls => jobs::ls(&ctx),
         Cmd::Rm => jobs::rm(&ctx, &a.words, a.all, a.force).await,
+        Cmd::Notify => jobs::notify(&ctx, &a.words, a.all).await,
     };
+}
+
+/// Base URL of the chatport server: `--server` (host:port or URL), else the
+/// config `bind` with a wildcard host made local.
+fn server_base(server: Option<&str>, bind: &str) -> String {
+    let addr = match server {
+        Some(s) => s.to_string(),
+        None => match (bind.strip_prefix("0.0.0.0:"), bind.strip_prefix("[::]:")) {
+            (Some(port), _) => format!("127.0.0.1:{port}"),
+            (_, Some(port)) => format!("[::1]:{port}"),
+            _ => bind.to_string(),
+        },
+    };
+    let addr = addr.trim_end_matches('/');
+    if addr.starts_with("http://") || addr.starts_with("https://") {
+        return addr.to_string();
+    }
+    return format!("http://{addr}");
+}
+
+/// Asks a running chatport server to auto-fetch job `short`. Returns the
+/// server's base URL.
+pub(crate) async fn notify_server(ctx: &Ctx, short: &str) -> Result<String> {
+    let base = server_base(ctx.server.as_deref(), &ctx.config.bind);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+    let mut req = client.post(format!("{base}/api/llmjob/{short}/poll"));
+    if let Some(a) = &ctx.config.auth {
+        req = req.basic_auth(&a.user, Some(&a.password));
+    }
+    let r = req
+        .send()
+        .await
+        .with_context(|| format!("no chatport server at {base}?"))?;
+    if !r.status().is_success() {
+        let status = r.status();
+        bail!(
+            "server at {base}: {status} {}",
+            r.text().await.unwrap_or_default()
+        );
+    }
+    return Ok(base);
 }
 
 /// Named profile (must exist), else `default` if configured, else empty.

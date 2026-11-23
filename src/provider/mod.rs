@@ -221,6 +221,8 @@ pub trait Provider: Send + Sync {
     /// Submits `req` as a one-request batch. Returns the batch id.
     async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)>;
     async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll>;
+    /// `GET` of a batch as raw JSON; None when unknown (404).
+    async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>>;
     /// Removes the stored batch upstream. Fails while it is still running.
     async fn delete_batch(&self, key: &str, id: &str) -> Result<()>;
 }

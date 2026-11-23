@@ -32,5 +32,8 @@
 - llmjob stdin only via explicit `-m -` (implicit read bites in loops/cron).
   `-c` always takes a value so it can't swallow the message text. `last` is an
   id ref file, not a symlink/copy (UI renames/moves would break a symlink).
-- llmjob batches are not polled by the server's batch poller: the server runs
-  on demand, so it can't guarantee fetching; `llmjob get --all` (manual/cron) instead.
+- one fetcher: the server's batch poller also fetches llmjob jobs (startup scan
+  + `llmjob notify`). Chatport batches need no outside fetcher: the startup scan
+  catches them. A CLI fetcher of chatport batches was rejected: the
+  save-once lock is in-process only. Notify is a separate command, not
+  automatic on `batch`. Server down → `llmjob get` / `get --all` by hand.

@@ -60,23 +60,6 @@ impl OpenRouter {
         return Ok((id.to_string(), info));
     }
 
-    /// `GET /batches/{id}` as JSON; None on 404.
-    pub async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>> {
-        let resp = self
-            .http
-            .get(format!("{BASE}/batches/{id}"))
-            .bearer_auth(key)
-            .send()
-            .await?;
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !resp.status().is_success() {
-            return Err(fail(resp).await);
-        }
-        return Ok(Some(resp.json().await?));
-    }
-
     pub fn new(key: String) -> Result<Self> {
         let http = reqwest::Client::builder()
             .default_headers(attribution_headers())
@@ -621,6 +604,22 @@ impl Provider for OpenRouter {
             None => Ok(BatchPoll::NotFound),
             Some(v) => parse_batch(&v),
         }
+    }
+
+    async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>> {
+        let resp = self
+            .http
+            .get(format!("{BASE}/batches/{id}"))
+            .bearer_auth(key)
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            return Err(fail(resp).await);
+        }
+        return Ok(Some(resp.json().await?));
     }
 
     async fn delete_batch(&self, key: &str, id: &str) -> Result<()> {

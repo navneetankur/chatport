@@ -8,6 +8,7 @@
 //! `get` can be repeated offline.
 
 use super::Ctx;
+use crate::config::Config;
 use crate::provider::openrouter::{BatchState, build_multi_batch_body, parse_batch_all};
 use crate::provider::{BatchReply, ChatRequest, Provider};
 use crate::store::now_ms;
@@ -161,19 +162,26 @@ enum Check {
     Done(Value),
     /// Still running: progress line for stderr.
     Pending(String),
+    /// Unknown upstream past the grace period (deleted, or older than 30 days).
+    Gone,
 }
 
 /// Reads the cache, or asks upstream once. A finished batch gets cached and
 /// its upstream copy deleted; a pending one updates the record's status.
-async fn check(ctx: &Ctx, jobs: &Jobs, job: &mut Job) -> Result<Check> {
+async fn check(
+    config: &Config,
+    provider: &dyn Provider,
+    jobs: &Jobs,
+    job: &mut Job,
+) -> Result<Check> {
     let cached = jobs.results(&job.short);
     if let Ok(b) = std::fs::read(&cached) {
         return Ok(Check::Done(
             serde_json::from_slice(&b).context("reading cached results")?,
         ));
     }
-    let key = ctx.config.key_for(job.key_name.as_deref())?.to_string();
-    let (status, progress) = match ctx.provider.batch_raw(&key, &job.batch_id).await? {
+    let key = config.key_for(job.key_name.as_deref())?.to_string();
+    let (status, progress) = match provider.batch_raw(&key, &job.batch_id).await? {
         Some(v) => match parse_batch_all(&v) {
             BatchState::Pending(info) => {
                 let counts = &v["request_counts"];
@@ -184,9 +192,12 @@ async fn check(ctx: &Ctx, jobs: &Jobs, job: &mut Job) -> Result<Check> {
                 (info.status, progress)
             }
             _ => {
-                std::fs::write(&cached, serde_json::to_vec(&v)?)?;
+                // Atomic: the server and the CLI may both be at it.
+                let tmp = cached.with_extension(format!("tmp{}", std::process::id()));
+                std::fs::write(&tmp, serde_json::to_vec(&v)?)?;
+                std::fs::rename(&tmp, &cached)?;
                 // Results are kept locally now; free the upstream copy.
-                if let Err(e) = ctx.provider.delete_batch(&key, &job.batch_id).await {
+                if let Err(e) = provider.delete_batch(&key, &job.batch_id).await {
                     log::warn!("deleting batch {} upstream: {e:#}", job.batch_id);
                 }
                 return Ok(Check::Done(v));
@@ -195,10 +206,7 @@ async fn check(ctx: &Ctx, jobs: &Jobs, job: &mut Job) -> Result<Check> {
         None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
             ("submitted".to_string(), format!("{}: submitted", job.short))
         }
-        None => bail!(
-            "batch {} not found upstream (deleted, or older than 30 days)",
-            job.batch_id
-        ),
+        None => return Ok(Check::Gone),
     };
     if status != job.status {
         job.status = status;
@@ -219,9 +227,10 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
         );
     }
     let v = loop {
-        match check(ctx, &jobs, &mut job).await? {
+        match check(&ctx.config, &ctx.provider, &jobs, &mut job).await? {
             Check::Done(v) => break v,
             Check::Pending(progress) => eprintln!("{progress}"),
+            Check::Gone => bail!("{}", gone_msg(&job)),
         }
         if !wait {
             return Ok(EXIT_PENDING);
@@ -229,6 +238,96 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
         tokio::time::sleep(WAIT_GAP).await;
     };
     return write_results(&jobs, job, &v, out);
+}
+
+fn gone_msg(job: &Job) -> String {
+    format!(
+        "{}: batch {} not found upstream (deleted, or older than 30 days)",
+        job.short, job.batch_id
+    )
+}
+
+/// Server poller: unfetched jobs as (short id, created_at ms).
+pub(crate) fn unfetched(data_dir: &Path) -> Result<Vec<(String, u64)>> {
+    let jobs = Jobs::open(data_dir)?;
+    return Ok(jobs
+        .all()?
+        .into_iter()
+        .filter(|j| !jobs.results(&j.short).exists())
+        .map(|j| (j.short, j.created_at))
+        .collect());
+}
+
+/// created_at of job `short`, for scheduling; Err if there is no such job.
+pub(crate) fn created_at(data_dir: &Path, short: &str) -> Result<u64> {
+    if short.is_empty() || !short.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        bail!("invalid job id");
+    }
+    return Ok(Jobs::open(data_dir)?.load(short)?.created_at);
+}
+
+/// Server poller: one check of job `short`. Some(created_at) = still running,
+/// check again later; None = nothing left to do (fetched, removed or gone).
+pub(crate) async fn poll_once(
+    config: &Config,
+    provider: &dyn Provider,
+    data_dir: &Path,
+    short: &str,
+) -> Result<Option<u64>> {
+    let jobs = Jobs::open(data_dir)?;
+    let Ok(mut job) = jobs.load(short) else {
+        return Ok(None); // removed with `llmjob rm`
+    };
+    match check(config, provider, &jobs, &mut job).await? {
+        Check::Done(v) => {
+            let state = match parse_batch_all(&v) {
+                BatchState::Failed(_) => "failed",
+                _ => "completed",
+            };
+            set_status(&jobs, &mut job, state)?;
+            log::info!("llmjob {short}: {state}, cached");
+            return Ok(None);
+        }
+        Check::Pending(progress) => {
+            log::info!("{progress}");
+            return Ok(Some(job.created_at));
+        }
+        Check::Gone => {
+            log::warn!("{}", gone_msg(&job));
+            return Ok(None);
+        }
+    }
+}
+
+/// `llmjob notify`: asks the server to auto-fetch the named jobs, or every
+/// unfetched one. Exit 1 if any notify failed.
+pub async fn notify(ctx: &Ctx, qs: &[String], all: bool) -> Result<i32> {
+    let jobs = Jobs::open(&ctx.data_dir)?;
+    let shorts: Vec<String> = if all {
+        unfetched(&ctx.data_dir)?
+            .into_iter()
+            .map(|(s, _)| s)
+            .collect()
+    } else {
+        qs.iter()
+            .map(|q| jobs.find(q).map(|j| j.short))
+            .collect::<Result<_>>()?
+    };
+    let mut failed = 0;
+    for short in &shorts {
+        if jobs.results(short).exists() {
+            eprintln!("{short}: already fetched");
+            continue;
+        }
+        match super::notify_server(ctx, short).await {
+            Ok(base) => eprintln!("{short}: server at {base} will fetch it"),
+            Err(e) => {
+                eprintln!("{short}: {e:#}");
+                failed += 1;
+            }
+        }
+    }
+    return Ok(if failed > 0 { 1 } else { 0 });
 }
 
 /// `llmjob get --all`: checks every unfetched job once and caches the
@@ -241,7 +340,7 @@ pub async fn get_all(ctx: &Ctx) -> Result<i32> {
         if jobs.results(&job.short).exists() {
             continue;
         }
-        match check(ctx, &jobs, &mut job).await {
+        match check(&ctx.config, &ctx.provider, &jobs, &mut job).await {
             Ok(Check::Done(v)) => {
                 let state = match parse_batch_all(&v) {
                     BatchState::Failed(_) => "failed",
@@ -254,6 +353,10 @@ pub async fn get_all(ctx: &Ctx) -> Result<i32> {
             Ok(Check::Pending(progress)) => {
                 eprintln!("{progress}");
                 running += 1;
+            }
+            Ok(Check::Gone) => {
+                eprintln!("{}", gone_msg(&job));
+                failed += 1;
             }
             Err(e) => {
                 eprintln!("{}: {e:#}", job.short);

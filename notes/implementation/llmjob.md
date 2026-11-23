@@ -29,9 +29,13 @@
   `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any failed.
 - `get --all`: checks every unfetched job once, caches finished ones (no
   outputs written), updates statuses for `ls`. Exit 2 if any still running, 1
-  if a check failed. Meant for manual or cron use; the server does not poll
-  llmjob jobs (it isn't always running).
-- `ls` local jobs (status as of the last check). `rm ID…` / `rm --all`: all ids resolved first (a typo
+  if a check failed. Manual or cron use; see also `notify`.
+- `ls` local jobs (status as of the last check).
+- `notify ID…|--all [--server ADDR]`: asks a running chatport server
+  (`POST api/llmjob/{short}/poll`, Basic auth from config) to auto-fetch the
+  jobs. Address: `--server` (host:port or URL), else config `bind` with
+  0.0.0.0/:: made local. Explicit on purpose (not done by `batch`); no server
+  → error. The server's startup scan also picks up every unfetched job. `rm ID…` / `rm --all`: all ids resolved first (a typo
   removes nothing). Fetched → local files removed. Not fetched: running is
   always skipped (no cancel); finished upstream is skipped unless `--force`
   (then deleted upstream); gone upstream → local removed. Summary on stderr,
