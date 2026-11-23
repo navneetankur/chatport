@@ -294,7 +294,7 @@ async fn create(State(s): St, body: Option<Json<PatchReq>>) -> R<Json<Meta>> {
 
 /// New conversations opt out of providers that log/train on prompts, unless
 /// the request or config sets `data_collection` explicitly.
-fn with_data_collection_default(provider: Option<Value>) -> Value {
+pub(crate) fn with_data_collection_default(provider: Option<Value>) -> Value {
     let mut p = provider.unwrap_or_else(|| json!({}));
     if let Some(obj) = p.as_object_mut() {
         obj.entry("data_collection").or_insert(json!("deny"));
@@ -307,7 +307,7 @@ const TITLE_MAX_CHARS: usize = 20;
 
 /// Title from the first message: its first non-empty line, else the first
 /// attachment's name, else the conversation id. Truncated with an ellipsis.
-fn title_from(first: &Message, conv_id: &str) -> String {
+pub(crate) fn title_from(first: &Message, conv_id: &str) -> String {
     let base = first
         .content
         .lines()

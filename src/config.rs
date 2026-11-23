@@ -28,6 +28,29 @@ pub struct Config {
     pub auth: Option<Auth>,
     #[serde(default)]
     pub batch: BatchConfig,
+    /// llmjob profiles (`-p NAME`); `default` is used when none is named.
+    #[serde(default)]
+    pub profile: std::collections::BTreeMap<String, Profile>,
+}
+
+/// An llmjob profile. Relative paths resolve against the config file's folder.
+#[derive(Deserialize, Clone, Debug, Default)]
+pub struct Profile {
+    pub model: Option<String>,
+    pub effort: Option<crate::provider::ReasoningEffort>,
+    /// Name of a `[[keys]]` entry. None = default key.
+    pub key: Option<String>,
+    /// System prompt files, joined before any `-s` files.
+    #[serde(default)]
+    pub system: Vec<String>,
+    /// Message files, put before any `-m` files in a new conversation.
+    #[serde(default)]
+    pub msg: Vec<String>,
+    /// Wrap message files in `<file name="…">` tags.
+    #[serde(default)]
+    pub headers: bool,
+    /// OpenRouter `provider` routing object. None = `default_provider`.
+    pub provider: Option<Value>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -180,6 +203,11 @@ pub fn expand_tilde(p: &str) -> PathBuf {
 
 /// Explicit path must exist; default path is optional.
 pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
+    return Ok(load_with_path(explicit)?.0);
+}
+
+/// Like `load`, also returning the config file's path (it may not exist).
+pub fn load_with_path(explicit: Option<PathBuf>) -> Result<(Config, PathBuf)> {
     let (path, required) = match explicit {
         Some(p) => (p, true),
         None => (expand_tilde("~/.config/chatport/config.toml"), false),
@@ -193,7 +221,7 @@ pub fn load(explicit: Option<PathBuf>) -> Result<Config> {
     for key in unknown {
         log::error!("{}: unknown config key `{key}` (ignored)", path.display());
     }
-    return Ok(cfg);
+    return Ok((cfg, path));
 }
 
 /// Parse config text, returning the paths of keys serde skipped (e.g. `auth.bind`).
@@ -277,6 +305,20 @@ mod tests {
         );
         let dup = "[[keys]]\nname=\"a\"\nkey=\"1\"\n[[keys]]\nname=\"a\"\nkey=\"2\"";
         assert!(cfg(dup).resolve_keys(None).is_err());
+    }
+
+    #[test]
+    fn profiles() {
+        let (c, unknown) = parse(
+            "[profile.cheap]\nmodel = \"m\"\neffort = \"low\"\nsystem = [\"s.md\"]\nheaders = true\nbogus = 1\n",
+        )
+        .unwrap();
+        let p = &c.profile["cheap"];
+        assert_eq!(p.model.as_deref(), Some("m"));
+        assert_eq!(p.effort, Some(crate::provider::ReasoningEffort::Low));
+        assert_eq!(p.system, ["s.md"]);
+        assert!(p.msg.is_empty() && p.headers && p.key.is_none());
+        assert_eq!(unknown, ["profile.cheap.bogus"]);
     }
 
     #[test]

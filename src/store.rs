@@ -484,6 +484,33 @@ impl Store {
         Ok(())
     }
 
+    /// Current folder of a chat, or None.
+    pub fn path_of(&self, id: &str) -> Result<Option<PathBuf>> {
+        return self.find(id);
+    }
+
+    /// Moves a chat folder from another store (`<id>-<label>`) into `group`
+    /// of this one. Fails if this store already has that id.
+    pub fn adopt(&self, dir: &Path, group: Option<&str>) -> Result<()> {
+        if let Some(g) = group {
+            check_group(g)?;
+        }
+        let name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .context("chat folder has no name")?;
+        let id = name.split_once('-').map(|(id, _)| id).unwrap_or_default();
+        let _g = self.write.lock().unwrap();
+        if self.find(id)?.is_some() {
+            bail!("conversation {id} already exists");
+        }
+        let target_dir = self.root.join(group.unwrap_or(UNGROUPED));
+        std::fs::create_dir_all(&target_dir)?;
+        std::fs::rename(dir, target_dir.join(name))
+            .with_context(|| format!("moving {}", dir.display()))?;
+        return Ok(());
+    }
+
     pub fn rename_group(&self, old: &str, new: &str) -> Result<()> {
         check_group(old)?;
         check_group(new)?;

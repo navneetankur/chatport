@@ -152,3 +152,21 @@ fn bad_ids_rejected() {
     assert!(s.find("../x").is_err());
     assert!(s.find("a-b").is_err());
 }
+
+#[test]
+fn adopt_moves_chat_between_stores() {
+    let t = TempDir::new();
+    let main = Store::open(t.0.clone()).unwrap();
+    let scratch = Store::open(t.0.join("scratch")).unwrap();
+    let m = meta("hello");
+    scratch.put_meta(&m).unwrap();
+    let dir = scratch.path_of(&m.id).unwrap().unwrap();
+    main.adopt(&dir, Some("llmjob")).unwrap();
+    assert!(scratch.meta(&m.id).unwrap().is_none());
+    assert_eq!(main.group_of(&m.id).unwrap().as_deref(), Some("llmjob"));
+    assert_eq!(main.meta(&m.id).unwrap().unwrap().title, "hello");
+    // Same id again: refused.
+    scratch.put_meta(&m).unwrap();
+    let dir = scratch.path_of(&m.id).unwrap().unwrap();
+    assert!(main.adopt(&dir, None).is_err());
+}
