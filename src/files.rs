@@ -46,6 +46,10 @@ pub fn read_text(path: &Path, name: &str) -> Result<Attachment> {
     return Ok(Attachment {
         name: name.to_string(),
         content,
+        hash: None,
+        size: None,
+        path: Some(path.display().to_string()),
+        missing: false,
     });
 }
 

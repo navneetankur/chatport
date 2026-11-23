@@ -3,7 +3,7 @@
   // `@path` mentions (chips + autocomplete), removable attachment chips.
   import { tick, untrack, type Snippet } from 'svelte';
   import * as api from './api';
-  import type { Attachment, FsEntry } from './api';
+  import type { Attachment, AttachmentEntry, FsEntry } from './api';
   import { emacsKey } from './emacsKeys';
   import { completion, mentions, typingAt, type Typing } from './mentions';
 
@@ -51,6 +51,59 @@
       attachments.push({ name: f.name, content: await f.text() });
     }
     if (fileInput) fileInput.value = '';
+  }
+
+  // Picker of earlier attachments: pinned first, then by last use.
+  let picker = $state<{ pinned: AttachmentEntry[]; recent: AttachmentEntry[] } | null>(null);
+  let pickFilter = $state('');
+
+  async function togglePicker() {
+    if (picker) {
+      picker = null;
+      return;
+    }
+    error = '';
+    try {
+      picker = await api.listAttachments();
+      pickFilter = '';
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function reloadPicker() {
+    picker = await api.listAttachments();
+  }
+
+  /** Every filter word must appear in the name, path or chat name. */
+  function pickMatches(e: AttachmentEntry): boolean {
+    const hay = `${e.name} ${e.path ?? ''} ${e.chat_name ?? ''}`.toLowerCase();
+    return pickFilter.toLowerCase().split(/\s+/).every((w) => hay.includes(w));
+  }
+
+  function choose(e: AttachmentEntry) {
+    if (!attachments.some((a) => a.hash === e.hash)) attachments.push({ name: e.name, hash: e.hash, size: e.size });
+    picker = null;
+  }
+
+  async function pickOp(op: () => Promise<unknown>) {
+    try {
+      await op();
+      await reloadPicker();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function kb(n: number): string {
+    return n < 1024 ? `${n} B` : `${Math.round(n / 1024)} KB`;
+  }
+
+  function ago(ms: number): string {
+    const m = Math.round((Date.now() - ms) / 60000);
+    if (m < 60) return `${m}m ago`;
+    if (m < 48 * 60) return `${Math.round(m / 60)}h ago`;
+    return `${Math.round(m / 1440)}d ago`;
   }
 
   // `@path` mentions: resolved on the server once the token is complete
@@ -201,6 +254,39 @@
       onchange={(e) => addFiles(e.currentTarget.files)}
     />
     <button type="button" title="Attach text/markdown files" onclick={() => fileInput?.click()}>📎</button>
+    <button type="button" class="pick-btn" title="Earlier attachments" onclick={togglePicker}>🗂</button>
+    {#if picker}
+      <div class="picker">
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          placeholder="Filter…"
+          bind:value={pickFilter}
+          autofocus
+          onkeydown={(e) => {
+            if (e.key === 'Escape') { e.preventDefault(); picker = null; }
+            else if (e.key === 'Enter') {
+              e.preventDefault();
+              const first = [...picker!.pinned, ...picker!.recent].find(pickMatches);
+              if (first) choose(first);
+            }
+          }}
+        />
+        <ul>
+          {#each [...picker.pinned.map((e) => ({ e, pinned: true })), ...picker.recent.map((e) => ({ e, pinned: false }))].filter((x) => pickMatches(x.e)) as { e, pinned } (e.hash)}
+            <li>
+              <button type="button" class="row" onclick={() => choose(e)}>
+                <span class="nm">{pinned ? '★ ' : ''}{e.name}</span>
+                <span class="sub">{kb(e.size)} · {ago(e.at)}{e.path ? ` · ${e.path}` : e.chat_name ? ` · ${e.chat_name}` : ''}</span>
+              </button>
+              <button type="button" title={pinned ? 'Unpin' : 'Pin'} onclick={() => pickOp(() => (pinned ? api.unpinAttachment(e.hash) : api.pinAttachment(e.hash)))}>{pinned ? '☆' : '★'}</button>
+              <button type="button" title="Hide from this list (until attached again)" onclick={() => pickOp(() => api.hideAttachment(e.hash))}>×</button>
+            </li>
+          {:else}
+            <li class="empty">No earlier attachments{pickFilter ? ' match' : ''}.</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     {#if comp}
       <ul class="comp" role="listbox">
         {#each comp.items as it, i (it.path)}
@@ -237,7 +323,7 @@
   /* Edit: textarea on its own row, then 📎 left and the actions right. */
   .compact form { padding: 0; border-top: none; flex-wrap: wrap; justify-content: flex-end; }
   .compact textarea { order: -1; flex-basis: 100%; }
-  .compact form > button:first-of-type { margin-right: auto; }
+  .compact form > .pick-btn { margin-right: auto; }
   .comp {
     position: absolute; bottom: 100%; left: 16px; right: 16px; z-index: 5;
     max-height: 40vh; overflow-y: auto; margin: 0 0 4px; padding: 4px 0; list-style: none;
@@ -249,5 +335,23 @@
     padding: 3px 10px; color: inherit; font: inherit; cursor: pointer; overflow-wrap: anywhere;
   }
   .comp button.sel, .comp button:hover { background: #4a8af433; }
+  .picker {
+    position: absolute; bottom: 100%; left: 16px; right: 16px; z-index: 5; margin: 0 0 4px;
+    max-height: 50vh; display: flex; flex-direction: column;
+    background: var(--field); border: 1px solid var(--border); border-radius: 6px; font-size: 0.9em;
+  }
+  .compact .picker { left: 0; right: 0; }
+  .picker input { margin: 6px; }
+  .picker ul { list-style: none; margin: 0; padding: 0 0 4px; overflow-y: auto; }
+  .picker li { display: flex; align-items: center; }
+  .picker li button { background: none; border: none; color: #888; cursor: pointer; }
+  .picker .row {
+    flex: 1; min-width: 0; text-align: left; color: inherit; padding: 3px 10px; font: inherit;
+    display: flex; flex-direction: column;
+  }
+  .picker .row:hover { background: #4a8af433; }
+  .picker .nm { overflow-wrap: anywhere; }
+  .picker .sub { color: #888; font-size: 0.85em; overflow-wrap: anywhere; }
+  .picker .empty { padding: 6px 10px; color: #888; }
   textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; padding: 8px; }
 </style>

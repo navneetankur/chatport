@@ -78,6 +78,8 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [ ] Web tools + file tools: server-tool limits reset each tool round; cap total `web_searches` across the loop if it ever matters.
 - [ ] Nice-to-have: per-group system prompt addendum (`<group>/group.json`).
 - [ ] Nice-to-have: attachment viewer as modal/side panel instead of a new tab.
+- [x] Attachment blobs: `attachments/<sha256>` + `attachments.jsonl` use log + `pinned.json`; 🗂 picker (pin/hide/filter); `chatport gc [--delete]`.
+- [ ] Attachment picker: not yet clicked through in a browser (API live-tested via curl).
 - [x] User messages render markdown too (shared `content` snippet in App.svelte, same `</>` raw toggle as replies).
 
 ## Deferred (not needed)
@@ -93,7 +95,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Per-conversation folder: `meta.json` (mutable) + `messages.jsonl` (append-only). Leaf lives in meta.json, not as JSONL records.
 - No index.json: list = scan `meta.json` files.
 - Branching = message tree via `parent_id` in one file (not file-per-branch).
-- Attachments: text/md only, inline in message. Images later → `attachments/<hash>` refs.
+- Attachments: text/md only. Was inline in the message; now content-addressed blobs (`attachments/<sha256>`), message keeps `{name, hash, size}`. Old inline messages still load. Picker data = append-only `attachments.jsonl` (newest line per hash wins), not an index; pins in `pinned.json`. No automatic deletion: `chatport gc` (dry run by default) with a loud 1 h mtime grace.
 - App attribution headers on every request, created hidden (no public rankings).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
@@ -143,3 +145,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-22: Batch poller: fixed 60 s tick replaced by sleep-until-earliest-due + `Notify` wake (no idle wake-ups, checks on time; the tick made checks land up to 60 s late, ~1 tick late every time because the next due was set after the HTTP call). Live (cap 1m, rebuilt binary): idle poller woken by submit, checks at +61 s then every ~61 s (60 s gap + ~1 s HTTP), reply saved- 2026-11-23: Web tools via OpenRouter server tools. Engine tests (scratch scripts, Gemini 3.6 Flash / Haiku 5.5 as judges): fetch `openrouter` = raw HTML, Exa clean; Anthropic native fetch blocked on theguardian.com and stale on Wikipedia; Gemini has no native fetch. Search: Google native ~$0.03–0.046/request (per-query $14/1k, 2–3 queries; results not counted as input), Anthropic native $0.012 + 14k tokens, Exa ~$0.017 with official sources first. Live (chatport, Gemini 3.6 Flash, effort low): date + Rust 1.100.0 with sources, `web_searches` 3 (= max_uses), cost $0.021 search + BYOK upstream; no-tools model → warning, tools not sent. Moved openrouter tests to `src/provider/openrouter/tests.rs`. 50 tests pass.
 .
 - 2026-11-23: Cost check (gpt-4o-mini, 1 search + 1 fetch): response gives only `cost` and `cost_details.upstream_inference_cost`; tool fee = difference ($0.008), not split. Fetched/search text counts as normal prompt tokens (11k). `/generation` (lags a few s) adds `num_search_results`, `num_fetches`, still one total. Added `{}` raw chunk view (last reply, memory only). Live: 58 deltas skipped, 7 raw chunks (5 annotations, finish_reason, usage). 51 tests pass.
+- 2026-11-23: Attachment blobs (`src/attachments.rs`). Send: `Attachments::save` hashes content (or loads it for a hash-only pick), writes/touches the blob, appends a log line (chat id + title, `@` path); `Store::append` strips content of hashed attachments. Load: `api::load_messages` hydrates; a gone blob → `missing: true` + error log, and send/regenerate on that path → 422 naming the file. Picker API: `GET /api/attachments` `{pinned, recent}`, `POST|DELETE …/{hash}/pin`, `POST …/{hash}/hide` (log line; re-attach un-hides; hiding unpins). `chatport gc [--delete]`: live = hashes in all messages + pins; blobs under 1 h skipped and printed; `--delete` removes orphans and compacts the log (newest line per kept hash; bytes appended meanwhile are copied over). Live (openrouter/free): same file in 2 chats → 1 blob, model saw content; hash-only pick + `@` file; pin/hide; missing blob → 422; gc dry run and delete. 61 tests pass. UI (🗂 next to 📎) svelte-check clean, not clicked through.

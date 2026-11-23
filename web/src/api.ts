@@ -14,7 +14,26 @@ export interface Usage {
 
 export interface Attachment {
   name: string;
-  content: string;
+  /** Absent when picked from the list (the server fills it from the blob). */
+  content?: string;
+  /** sha256 = blob name; set by the server. */
+  hash?: string;
+  size?: number;
+  /** Server path of an `@path` file. */
+  path?: string;
+  /** Blob is gone; the message can't be sent again. */
+  missing?: boolean;
+}
+
+/** Picker entry: newest use of one attachment blob. */
+export interface AttachmentEntry {
+  hash: string;
+  name: string;
+  size: number;
+  at: number;
+  chat?: string;
+  chat_name?: string;
+  path?: string;
 }
 
 export interface ToolCall {
@@ -308,6 +327,15 @@ export async function fetchFile(conv: string | undefined, path: string): Promise
     throw e;
   }
 }
+
+export const listAttachments = () =>
+  fetch('api/attachments').then((r) => json<{ pinned: AttachmentEntry[]; recent: AttachmentEntry[] }>(r));
+
+const attachmentOp = (hash: string, op: 'pin' | 'hide', method = 'POST') =>
+  fetch(`api/attachments/${hash}/${op}`, { method }).then((r) => json<unknown>(r));
+export const pinAttachment = (hash: string) => attachmentOp(hash, 'pin');
+export const unpinAttachment = (hash: string) => attachmentOp(hash, 'pin', 'DELETE');
+export const hideAttachment = (hash: string) => attachmentOp(hash, 'hide');
 
 export const patchConversation = (id: string, patch: MetaPatch) =>
   fetch(`api/conversations/${id}`, {

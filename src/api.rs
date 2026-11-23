@@ -58,6 +58,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/recent-models", get(recent_models))
         .route("/api/file", get(file))
         .route("/api/ls", get(ls))
+        .route("/api/attachments", get(attachment_list))
+        .route(
+            "/api/attachments/{hash}/pin",
+            post(attachment_pin).delete(attachment_unpin),
+        )
+        .route("/api/attachments/{hash}/hide", post(attachment_hide))
         .route("/api/conversations", get(list).post(create))
         .route("/api/conversations/new", get(template))
         .route(
@@ -85,6 +91,58 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 async fn models(State(s): St) -> R<Json<Value>> {
     Ok(Json(json!(s.provider.list_models().await?)))
+}
+
+/// Picker: pinned attachments, then recently attached ones (newest first).
+async fn attachment_list(State(s): St) -> R<Json<crate::attachments::Picker>> {
+    Ok(Json(s.attachments.picker()?))
+}
+
+async fn attachment_pin(State(s): St, Path(hash): Path<String>) -> R<Json<Value>> {
+    s.attachments
+        .pin(&hash)
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(Json(json!({ "pinned": true })))
+}
+
+async fn attachment_unpin(State(s): St, Path(hash): Path<String>) -> R<Json<Value>> {
+    let was = s.attachments.unpin(&hash)?;
+    Ok(Json(json!({ "unpinned": was })))
+}
+
+async fn attachment_hide(State(s): St, Path(hash): Path<String>) -> R<Json<Value>> {
+    s.attachments
+        .hide(&hash)
+        .map_err(|e| bad(&format!("{e:#}")))?;
+    Ok(Json(json!({ "hidden": true })))
+}
+
+/// Messages with blob-backed attachment content filled in.
+fn load_messages(s: &AppState, id: &str) -> anyhow::Result<Vec<Message>> {
+    let mut msgs = s.store.messages(id)?;
+    for m in &mut msgs {
+        for a in &mut m.attachments {
+            s.attachments.hydrate(a);
+        }
+    }
+    return Ok(msgs);
+}
+
+/// Refuses to build a prompt with an attachment whose blob is gone.
+fn no_missing_blobs(msgs: &[Message], leaf: &str) -> R<()> {
+    for m in tree::path(msgs, leaf) {
+        if let Some(a) = m.attachments.iter().find(|a| a.missing) {
+            return Err(ApiError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!(
+                    "attachment {:?} is missing from attachments/ (blob {})",
+                    a.name,
+                    a.hash.as_deref().unwrap_or("?")
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Key names only, never the keys themselves.
@@ -280,7 +338,7 @@ struct ConvResp {
 
 async fn get_conv(State(s): St, Path(id): Path<String>) -> R<Json<ConvResp>> {
     let meta = load_meta(&s, &id)?;
-    let messages = s.store.messages(&id)?;
+    let messages = load_messages(&s, &id)?;
     let leaf = tree::resolve_leaf(&messages, meta.leaf.as_deref());
     Ok(Json(ConvResp {
         meta,
@@ -436,7 +494,7 @@ struct SendReq {
 async fn send(State(s): St, Path(id): Path<String>, Json(r): Json<SendReq>) -> R<Response> {
     let mut meta = load_meta(&s, &id)?;
     no_pending_batch(&meta)?;
-    let mut msgs = s.store.messages(&id)?;
+    let mut msgs = load_messages(&s, &id)?;
     if let Some(p) = &r.parent_id {
         match msgs.iter().find(|m| &m.id == p) {
             None => return Err(bad("unknown parent_id")),
@@ -449,11 +507,19 @@ async fn send(State(s): St, Path(id): Path<String>, Json(r): Json<SendReq>) -> R
     if r.content.trim().is_empty() && r.attachments.is_empty() {
         return Err(bad("empty message"));
     }
-    let user = Message::user(r.parent_id, r.content, r.attachments);
-    s.store.append(&id, &user)?;
+    if let Some(p) = &r.parent_id {
+        no_missing_blobs(&msgs, p)?;
+    }
+    let mut user = Message::user(r.parent_id, r.content, r.attachments);
     if msgs.is_empty() && meta.title == DEFAULT_TITLE {
         meta.title = title_from(&user, &id);
     }
+    for a in &mut user.attachments {
+        s.attachments
+            .save(a, &id, &meta.title)
+            .map_err(|e| bad(&format!("{e:#}")))?;
+    }
+    s.store.append(&id, &user)?;
     meta.leaf = Some(user.id.clone());
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
@@ -474,7 +540,8 @@ struct RegenReq {
 async fn regenerate(State(s): St, Path(id): Path<String>, Json(r): Json<RegenReq>) -> R<Response> {
     let meta = load_meta(&s, &id)?;
     no_pending_batch(&meta)?;
-    let msgs = s.store.messages(&id)?;
+    let msgs = load_messages(&s, &id)?;
+    no_missing_blobs(&msgs, &r.user_id)?;
     let user = match msgs.iter().find(|m| m.id == r.user_id) {
         Some(m) if m.role == Role::User => m.clone(),
         Some(_) => return Err(bad("user_id must be a user message")),
@@ -860,6 +927,7 @@ mod tests {
         let att = Attachment {
             name: "notes.md".into(),
             content: "x".into(),
+            ..Default::default()
         };
         assert_eq!(title_from(&m("  ", vec![att]), "cid"), "notes.md");
         assert_eq!(title_from(&m("", vec![]), "cid"), "cid");
@@ -883,6 +951,7 @@ mod tests {
             vec![Attachment {
                 name: "a.md".into(),
                 content: "x ```` y".into(),
+                ..Default::default()
             }],
         );
         let f = flatten(&m);

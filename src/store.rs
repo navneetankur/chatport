@@ -82,10 +82,35 @@ pub struct PendingBatch {
     pub info: BatchInfo,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Attachment {
     pub name: String,
+    /// Empty on disk when `hash` is set (content lives in the blob, see attachments.rs).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content: String,
+    /// sha256 of the content = blob file name. None = old inline attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// Resolved server path of an `@path` file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Set on load when the blob is gone. Never meaningful on disk.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub missing: bool,
+}
+
+impl Attachment {
+    /// The on-disk form: content dropped when a blob holds it.
+    pub fn stripped(&self) -> Self {
+        let mut a = self.clone();
+        a.missing = false;
+        if a.hash.is_some() {
+            a.content.clear();
+        }
+        return a;
+    }
 }
 
 /// One model request that ended in tool calls, plus their results.
@@ -410,7 +435,13 @@ impl Store {
     pub fn append(&self, id: &str, msg: &Message) -> Result<()> {
         let _g = self.write.lock().unwrap();
         let dir = self.dir(id)?;
-        let mut line = serde_json::to_vec(msg)?;
+        let mut line = if msg.attachments.iter().any(|a| a.hash.is_some()) {
+            let mut m = msg.clone();
+            m.attachments = m.attachments.iter().map(Attachment::stripped).collect();
+            serde_json::to_vec(&m)?
+        } else {
+            serde_json::to_vec(msg)?
+        };
         line.push(b'\n');
         std::fs::OpenOptions::new()
             .create(true)

@@ -768,9 +768,13 @@
               {@render content(m)}
               {#each m.attachments ?? [] as a}
                 <div class="att">
-                  <button class="link" title="Open in new tab" onclick={() => openText(a.content)}>📎 {a.name}</button>
-                  {#if /\.(md|markdown)$/i.test(a.name)}
-                    <button class="link" title="Open rendered in new tab" onclick={() => openHtml(a.name, renderMarkdown(a.content))}>rendered</button>
+                  {#if a.missing}
+                    <span class="att-missing" title="Blob {a.hash} is gone from attachments/">⚠ {a.name} (missing)</span>
+                  {:else}
+                    <button class="link" title="Open in new tab" onclick={() => openText(a.content ?? '')}>📎 {a.name}</button>
+                    {#if /\.(md|markdown)$/i.test(a.name)}
+                      <button class="link" title="Open rendered in new tab" onclick={() => openHtml(a.name, renderMarkdown(a.content ?? ''))}>rendered</button>
+                    {/if}
                   {/if}
                 </div>
               {/each}
@@ -1118,4 +1122,5 @@
     }
     .totals { display: none; }
   }
+  .att-missing { color: #e5484d; }
 </style>

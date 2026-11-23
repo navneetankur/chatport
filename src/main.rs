@@ -1,6 +1,7 @@
 #![allow(clippy::needless_return)] // house style: explicit return in multi-statement fns
 
 mod api;
+mod attachments;
 mod auth;
 mod batch;
 mod config;
@@ -19,6 +20,8 @@ use std::sync::Arc;
 
 pub struct AppState {
     pub store: store::Store,
+    /// Attachment blobs, use log and pins.
+    pub attachments: attachments::Attachments,
     /// Recently picked models (state.json).
     pub recent: recent::Recent,
     pub provider: Arc<dyn provider::Provider>,
@@ -36,6 +39,8 @@ struct Args {
     config: Option<PathBuf>,
     keyfile: Option<PathBuf>,
     bind: Option<String>,
+    /// `chatport gc`: Some(delete).
+    gc: Option<bool>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -44,6 +49,7 @@ fn parse_args() -> Result<Args> {
         config: None,
         keyfile: None,
         bind: None,
+        gc: None,
     };
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -55,15 +61,19 @@ fn parse_args() -> Result<Args> {
                     &args.next().context("--keyfile needs a path")?,
                 ))
             }
+            "gc" if out.gc.is_none() => out.gc = Some(false),
+            "--delete" if out.gc.is_some() => out.gc = Some(true),
             "--bind" => out.bind = Some(args.next().context("--bind needs an address")?),
             // Keys on the command line are visible to every user via ps / /proc.
             "--key" => anyhow::bail!("--key was removed (visible in ps); use --keyfile PATH"),
             "--help" | "-h" => {
                 println!(
-                    "usage: chatport [--config PATH] [--keyfile PATH] [--bind ADDR]\n  \
+                    "usage: chatport [--config PATH] [--keyfile PATH] [--bind ADDR]\n       \
+                     chatport [--config PATH] gc [--delete]\n  \
                      config default: ~/.config/chatport/config.toml\n  \
                      --keyfile / OPENROUTER_API_KEY override the default config key\n  \
-                     --bind overrides the config bind (systemd socket activation still wins)"
+                     --bind overrides the config bind (systemd socket activation still wins)\n  \
+                     gc lists attachment blobs no message or pin uses; --delete removes them"
                 );
                 std::process::exit(0);
             }
@@ -98,6 +108,11 @@ async fn run(act: listen::Activation) -> Result<()> {
 
     let args = parse_args()?;
     let mut cfg = config::load(args.config)?;
+    let data_dir = config::expand_tilde(&cfg.data_dir);
+    if let Some(delete) = args.gc {
+        let store = store::Store::open(data_dir.clone())?;
+        return attachments::Attachments::open(&data_dir)?.gc(&store, delete);
+    }
     let override_key = match &args.keyfile {
         Some(p) => Some(read_keyfile(p)?),
         None => std::env::var("OPENROUTER_API_KEY").ok(),
@@ -112,10 +127,12 @@ async fn run(act: listen::Activation) -> Result<()> {
         cfg.key_names(),
         cfg.default_key.as_deref().unwrap_or_default()
     );
-    let store = store::Store::open(config::expand_tilde(&cfg.data_dir))?;
+    let store = store::Store::open(data_dir.clone())?;
+    let attachments = attachments::Attachments::open(&data_dir)?;
     let recent = recent::Recent::open(config::expand_tilde(&cfg.data_dir))?;
     let state = Arc::new(AppState {
         store,
+        attachments,
         recent,
         provider: Arc::new(provider::openrouter::OpenRouter::new(
             cfg.key_for(None)?.to_string(),
