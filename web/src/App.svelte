@@ -48,6 +48,12 @@
   let messages = $state<Message[]>([]);
   let leaf = $state<string | null>(null);
   let streaming = $state<Message | null>(null);
+  // Tab title: chat title first (survives narrow tabs), dot while a reply streams.
+  $effect(() => {
+    let t = current && !isDraft ? current.title.trim() : '';
+    if (t.length > 60) t = t.slice(0, 59) + '…';
+    document.title = (streaming ? '● ' : '') + (t ? `${t} · chatport` : 'chatport');
+  });
   /** Raw provider chunks of the last reply streamed here; memory only, so gone on reload or next send. */
   let lastRaw = $state<{ id: string; chunks: unknown[] } | null>(null);
   let showRaw = $state(false);
