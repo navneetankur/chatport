@@ -1,7 +1,7 @@
 # chatport — preamble for new sessions
 
 Personal LAN chat server for LLMs via OpenRouter. Single user, started on demand.
-Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embedded in the binary.
+Rust backend (axum) + Svelte/TS frontend, embedded in the binary. Plus `llmjob`, a CLI binary in the same crate (one-shot calls + OpenRouter batches).
 
 **Read first:** `TRACKER.md` (status, next steps, handoff notes), then `PLAN.md` (design) as needed.
 
@@ -16,6 +16,7 @@ Rust backend (axum) + Svelte/TS frontend (not started yet), frontend to be embed
 ## Commands
 - `cargo test` — unit tests (tree, request body/caching, SSE parsing, flatten)
 - `cargo build && ./target/debug/chatport -c config.toml` — run (see `config.example.toml`)
+- `./target/debug/llmjob --config config.toml --keyfile key.txt run hi` — CLI (`llmjob --help`; design in PLAN.md "llmjob")
 - Key priority: `--keyfile` > `OPENROUTER_API_KEY` env > config. (`--key` removed: argv is visible in `ps`.)
 
 ## Live testing

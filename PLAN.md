@@ -21,7 +21,9 @@ Self-hosted chat UI for LLMs via OpenRouter. Runs on one machine (started on dem
 chatport/
   Cargo.toml
   src/
-    main.rs          # config, router, startup
+    lib.rs           # modules + AppState (shared by both binaries)
+    main.rs          # server: config, router, startup
+    bin/llmjob.rs    # CLI, logic in llmjob.rs + llmjob/
     config.rs
     api.rs           # HTTP handlers
     store.rs         # JSONL read/append, index
@@ -162,6 +164,16 @@ Storage: the whole loop runs in one generation and is saved as one assistant mes
 ## Web tools
 Per-chat switch `meta.web_tools` (off by default). Uses OpenRouter server tools on `/chat/completions` (OpenRouter runs the loop, the stream just pauses with `: OPENROUTER PROCESSING` comments): `openrouter:web_search` and `openrouter:web_fetch`, both pinned to `engine: "exa"`, plus `openrouter:datetime` (free). Limits: search `max_results 5, max_uses 3`; fetch `max_uses 3, max_content_tokens 10000`. Limits are per API request, so with file tools on they reset every tool round (accepted). Only sent when the model's `supported_parameters` has `tools` (unknown ids, e.g. routers, get them anyway); otherwise a message `warning`. Not in batch. Citations come back inline as markdown links; `annotations` are ignored. `usage.server_tool_use_details.web_search_requests` is kept as `Usage.web_searches`.
 Why Exa (tested 2026-11-23, see TRACKER): `openrouter` fetch engine returns raw HTML; native fetch (Anthropic) was blocked on one site and stale on another; Gemini has no native fetch. Native search costs ~2x Exa (Google $14/1k per query, several queries per request; Anthropic $10/1k + results as input tokens) with redirect URLs (Google) or secondary sources (Anthropic).
+
+## llmjob (CLI)
+Second binary in the same crate (`src/bin/llmjob.rs` → `chatport::llmjob`), same config file, keys and data_dir.
+- `llmjob run [-s FILE]… [-m FILE]… [TEXT…]`: streams the reply to stdout. `-m -` = stdin (explicit; never read implicitly). Options may go before or after the command.
+- Message = profile `msg` files + `-m` files + TEXT (batch: + the `--dir` file), each trimmed at the end, empty ones skipped, joined by a blank line. `--headers` (or profile `headers`) wraps files in `<file name="…">…</file>`. System = profile `system` files + `-s` files, same rules, no headers; all empty → no system message.
+- Profiles: `[profile.NAME]` with `model`, `effort`, `key` (a `[[keys]]` name), `system`, `msg`, `headers`, `provider`. `-p NAME`; `default` used when present. Relative paths resolve against the config file's folder. `--model` / `--effort` override.
+- Conversations are chatport conversations. Unsaved runs go to a one-chat scratch store (`data_dir/llmjob/scratch/`, replaced by the next unsaved run). `--save` or `llmjob keep` puts it in `conversations/llmjob/` (visible in the web UI). Ids shown = last 6 chars (the random part of the uuid v7); lookup by prefix or suffix.
+- `-c ID|last` continues (value always required, so `-c hello` can't eat the text). `data_dir/llmjob/last` holds the id of the last run's conversation (saved or not): a ref, not a copy/symlink, so renames/moves in the UI don't break it. Continue: stored system prompt kept (`-s` is an error), profile `system`/`msg` skipped, explicit `-p`/`--model`/`--effort` change the conversation's settings. `--save` with `-c` on a scratch chat keeps it.
+- `llmjob batch [...] [--dir DIR]`: one OpenRouter batch, one request per regular non-hidden file in DIR (sorted), or one request without `--dir`. Model gets `:batch` appended if missing. Prints a short job id (3 chars from an unambiguous alphabet). Record in `data_dir/llmjob/jobs/<id>.json`. custom_id sent is `r<i>` (providers restrict its characters); file names stay in the record.
+- `llmjob get ID|last [--dir OUT] [--wait]`: exit 2 + status on stderr while running (`--wait` polls every 60 s). Finished: raw batch cached as `jobs/<id>.results.json`, upstream copy deleted, so `get` repeats offline. Without `--dir` only a one-request job, to stdout; with `--dir`, `OUT/<name>`, errors in `OUT/<name>.err`. Summary + batch cost on stderr; exit 1 if any request failed. `ls` lists local jobs; `rm` deletes upstream (refused while running: no cancel exists) and locally.
 
 ## Later / not now
 

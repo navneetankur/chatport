@@ -55,6 +55,8 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - [x] New conversations default to `provider.data_collection: "deny"` (unless request/config sets it). Existing convs not migrated. Verified `openrouter/free` still routes with deny.
 - [x] Per-message copy / download (.md, `<title-slug>-<msg-id>.md`) for user + assistant; raw-markdown toggle on assistant msgs (not persisted); copy button on code blocks. Reasoning excluded. Clipboard falls back to execCommand on plain-HTTP LAN.
 - [x] Multiple named API keys in config, picked per conversation in settings (switchable mid-chat).
+- [x] `llmjob` CLI (PLAN.md "llmjob"): run / -c / --save / keep, batch / get / ls / rm, profiles.
+- [ ] llmjob: Ctrl-C during `run` leaves the user message without a reply; the next `-c` then stacks a second user message under it. Save a partial reply on SIGINT if it bothers.
 - [ ] Code blocks: syntax highlighting (highlight.js).
 - [x] File tools (list/read/write/edit in file root, auto-applied, diffs stored).
 - [ ] File tools UI: not yet clicked through in a browser (live-tested via curl only).
@@ -100,6 +102,7 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - Caching: explicit `cache_control` on system + last user/tool msg for `anthropic/*` only; others (incl. Gemini) implicit.
 - Generation runs in a spawned task → reply saved even if browser disconnects.
 - Batch = `:batch` model suffix (no separate toggle); one pending batch per conversation, stored in meta.json; manual ⟳ only, no webhooks (LAN).
+- llmjob is a second binary in the same crate (lib split), not a separate crate/workspace or a script: reuses provider, config, keys, store. Its conversations are normal chatport conversations (group `llmjob`), unsaved ones in a separate scratch store.
 - `session_id` = conversation id on every request (shared across branches): sticky provider routing from turn 1, Sessions grouping in OpenRouter logs. Ignored for routing when `provider.order` is set.
 
 ## Handoff notes
@@ -151,3 +154,4 @@ Milestones 1–6 done (5 and 6 not yet clicked through in a browser).
 - 2026-11-23: `pinned.json` removed: pin/unpin/hide append a copy of the newest line with the flag changed (keeping `at`, so not a use; no-op changes append nothing). Picker sorts by `at`. gc treats pinned-in-newest-line as live. Live: pin, then direct re-attach with content → still pinned.
 - 2026-11-23: Re-attach / pin lookup (`attachments::find_newest`) reads the log backwards in 4 KB steps, carrying a cut line into the next step; stops at the first match. picker and gc still read the whole log.
 - 2026-11-23: 📎 and 🗂 merged into one "+" button with a menu (Upload file… / Pick existing…); closes on outside click or Esc. svelte-check clean, not clicked through in a browser.
+- 2026-11-23: llmjob. Crate split into `src/lib.rs` (modules + `AppState`) + `main.rs`; `src/bin/llmjob.rs` calls `chatport::llmjob::main`. Provider: `build_multi_batch_body` / `parse_batch_all` (N requests; single-request versions built on them), `OpenRouter::submit_batch_body` / `batch_raw`. Config `[profile.*]` + `load_with_path`; `read_keyfile` moved to config. Store: `path_of`, `adopt` (move a chat folder in from another store). Hand-rolled arg parsing like main.rs (no clap). Live (`openrouter/free`): run, `-c last`, `-m -`, keep (twice → "already saved"), `--save`, `-c <suffix> --effort low` (meta updated) all OK; scratch replaced by the next unsaved run. Batch: Anthropic rejected file names as custom_id (`[A-Za-z0-9_-]` only) → now `r<i>`, names kept locally.

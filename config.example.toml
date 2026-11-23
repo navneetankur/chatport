@@ -30,3 +30,14 @@ default_model = "openrouter/free"
 # "0" or "off" disables (⟳ in the UI still works).
 # [batch]
 # poll_interval = "1h"
+
+# llmjob profiles (`llmjob -p NAME`; `default` is used when present).
+# Relative paths resolve against this file's folder.
+# [profile.default]
+# model = "openrouter/free"
+# effort = "low"              # max|xhigh|high|medium|low|minimal|none
+# key = "personal"            # a [[keys]] name; default key when unset
+# system = ["prompts/short.md"]
+# msg = []                    # prepended to the first message of new conversations
+# headers = false             # wrap message files in <file name="…"> tags
+# provider = { only = ["anthropic"] }
