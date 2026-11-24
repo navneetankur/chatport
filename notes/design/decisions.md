@@ -52,3 +52,9 @@
   the poller gave up. A hash over a "sent with --keyfile" flag: also catches a
   changed config key or the wrong file. Full hash: the key is random, so the
   hash reveals nothing usable; truncating would only save bytes.
+- one batch upstream core (`batch::upstream`) for chatport and llmjob: record,
+  submit, one look, key guard, delete were written twice and the key guard
+  would have been a third copy. Split at "what happens to a finished batch"
+  (conversation tree under `batch_lock` vs job files). Record fields unified
+  (`id`, `submitted_at`); llmjob's old names read via serde aliases.
+  `PendingBatch` JSON unchanged (flatten), so the frontend is untouched.

@@ -16,10 +16,9 @@
   profile/stored name, else the default key (`OPENROUTER_API_KEY` replaces that
   one's value). A job sent with `--keyfile` stores no name: `get`/`rm` need the
   same `--keyfile`; the server poller uses its own default key.
-- job record `key_hash` = sha256 hex of the submit key. Before any upstream
-  call (`check`, `rm_one`) the key is compared: mismatch → `WrongKey` error,
-  record untouched; the server poller warns once and stops polling the job.
-  Cached results need no key. Records without the field take any key.
+- job records carry `key_hash` (batch.md, shared core): `get`/`rm` with
+  another key → `WrongKey` error, record untouched; the server poller warns
+  and stops polling the job. Cached results need no key.
   OpenRouter: valid key + batch unknown to its account → 404, bad key → 401.
 - `run`: streams to stdout; stored as a chatport conversation. Unsaved → one-chat
   scratch store `data_dir/llmjob/scratch/` (replaced by the next unsaved run);

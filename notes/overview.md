@@ -39,7 +39,8 @@ demand. Rust (axum) backend, Svelte/TS frontend embedded in the binary. Plus
 - text attachments: upload, pick existing, `@path` mentions + autocomplete. attachments.md
 - file tools (list/read/write/edit in `file_root`, diffs stored). tools.md
 - web tools (OpenRouter server tools: Exa search/fetch, datetime). tools.md
-- batch replies for `:batch` models, server auto-poll. batch.md
+- batch replies for `:batch` models, server auto-poll; upstream core shared
+  with llmjob (`src/batch/upstream.rs`). batch.md
 - groups, draft chats, recent models, rename. frontend.md, storage.md
 - optional Basic auth, systemd socket activation. server.md
 - `llmjob run/keep/batch/get/ls/rm`, config profiles; server poller also
