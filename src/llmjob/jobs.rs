@@ -13,8 +13,9 @@
 //! `get` can be repeated offline.
 
 use super::Ctx;
+use crate::batch::upstream::{self, BatchRef, Look};
 use crate::config::Config;
-use crate::provider::openrouter::{BatchState, build_multi_batch_body, parse_batch_all};
+use crate::provider::openrouter::{BatchState, parse_batch_all};
 use crate::provider::{BatchReply, ChatRequest, Provider};
 use crate::store::now_ms;
 use anyhow::{Context, Result, bail};
@@ -23,8 +24,6 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// A fresh batch can 404 for a few seconds after submit.
-const VISIBLE_AFTER_MS: u64 = 120_000;
 const WAIT_GAP: Duration = Duration::from_secs(60);
 /// Name of the single request when no `--dir` is given.
 const SINGLE: &str = "output";
@@ -34,18 +33,12 @@ pub const EXIT_PENDING: i32 = 2;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Job {
     pub short: String,
-    pub batch_id: String,
+    /// id, key name + hash, submitted_at (old records: batch_id, created_at).
+    #[serde(flatten)]
+    pub batch: BatchRef,
     pub model: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_name: Option<String>,
-    /// sha256 hex of the key the batch was sent with: upstream answers 404,
-    /// not 401, for a batch another account owns, which would look like
-    /// "gone". None in records from before this field (any key goes).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_hash: Option<String>,
-    pub created_at: u64,
     /// Name of each request (input file name), in submit order. Request i
-    /// is sent as custom_id `r<i>`: providers restrict custom_id characters.
+    /// is sent as `upstream::custom_id(i)`.
     pub names: Vec<String>,
     /// Last known status.
     pub status: String,
@@ -54,29 +47,6 @@ pub struct Job {
 pub struct Jobs {
     pending: PathBuf,
     done: PathBuf,
-}
-
-/// The key about to be used is not the one the job was sent with.
-#[derive(Debug)]
-pub struct WrongKey;
-
-impl std::fmt::Display for WrongKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("sent with another key; pass the --keyfile (or config key) it was sent with")
-    }
-}
-
-impl std::error::Error for WrongKey {}
-
-/// Refuses a key other than the job's (`WrongKey`). Records without a hash
-/// take any key.
-fn verify_key(job: &Job, key: &str) -> Result<()> {
-    if let Some(h) = &job.key_hash
-        && *h != crate::attachments::hash_of(key)
-    {
-        return Err(WrongKey.into());
-    }
-    return Ok(());
 }
 
 /// Job ids (file stems) in `dir`: `<short>.json`, skipping results and tmp files.
@@ -188,7 +158,7 @@ impl Jobs {
                 Err(e) => log::warn!("skipping job {s}: {e:#}"),
             }
         }
-        out.sort_by_key(|j| j.created_at);
+        out.sort_by_key(|j| j.batch.submitted_at);
         return out;
     }
 
@@ -247,22 +217,13 @@ impl Jobs {
 pub async fn submit(ctx: &Ctx, reqs: Vec<(String, ChatRequest)>) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
     let (_, first) = reqs.first().context("nothing to submit")?;
-    let (model, key) = (first.model.clone(), first.key.clone());
-    let mut names = Vec::with_capacity(reqs.len());
-    let mut sent = Vec::with_capacity(reqs.len());
-    for (i, (name, req)) in reqs.into_iter().enumerate() {
-        names.push(name);
-        sent.push((custom_id(i), req));
-    }
-    let body = build_multi_batch_body(&sent)?;
-    let (batch_id, info) = ctx.provider.submit_batch_body(&key, &body).await?;
+    let model = first.model.clone();
+    let (names, reqs): (Vec<String>, Vec<ChatRequest>) = reqs.into_iter().unzip();
+    let (batch, info) = upstream::submit(&ctx.provider, ctx.key_name.clone(), reqs).await?;
     let job = Job {
         short: jobs.new_short(),
-        batch_id,
+        batch,
         model,
-        key_name: ctx.key_name.clone(),
-        key_hash: Some(crate::attachments::hash_of(&key)),
-        created_at: now_ms(),
         names,
         status: info.status,
     };
@@ -296,31 +257,24 @@ async fn check(
             serde_json::from_slice(&b).context("reading cached results")?,
         ));
     }
-    let key = key(job.key_name.as_deref())?;
-    verify_key(job, &key)?;
-    let (status, progress) = match provider.batch_raw(&key, &job.batch_id).await? {
-        Some(v) => match parse_batch_all(&v) {
-            BatchState::Pending(info) => {
-                let counts = &v["request_counts"];
-                let progress = format!(
-                    "{}: {} ({}/{} done, {} failed)",
-                    job.short, info.status, counts["completed"], counts["total"], counts["failed"]
-                );
-                (info.status, progress)
-            }
-            _ => {
-                jobs.finish(&job.short, &v)?;
-                // Results are kept locally now; free the upstream copy.
-                if let Err(e) = provider.delete_batch(&key, &job.batch_id).await {
-                    log::warn!("deleting batch {} upstream: {e:#}", job.batch_id);
-                }
-                return Ok(Check::Done(v));
-            }
-        },
-        None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
-            ("submitted".to_string(), format!("{}: submitted", job.short))
+    let key = key(job.batch.key_name.as_deref())?;
+    let (status, progress) = match upstream::look(provider, &job.batch, &key).await? {
+        Look::Pending { info, raw } => {
+            let counts = &raw["request_counts"];
+            let progress = format!(
+                "{}: {} ({}/{} done, {} failed)",
+                job.short, info.status, counts["completed"], counts["total"], counts["failed"]
+            );
+            (info.status, progress)
         }
-        None => return Ok(Check::Gone),
+        Look::Done(v) => {
+            jobs.finish(&job.short, &v)?;
+            // Results are kept locally now; free the upstream copy.
+            upstream::delete(provider, &job.batch, &key).await;
+            return Ok(Check::Done(v));
+        }
+        Look::Submitted => ("submitted".to_string(), format!("{}: submitted", job.short)),
+        Look::Gone => return Ok(Check::Gone),
     };
     if status != job.status {
         job.status = status;
@@ -356,10 +310,7 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
 }
 
 fn gone_msg(job: &Job) -> String {
-    format!(
-        "{}: batch {} not found upstream (deleted, or older than 30 days)",
-        job.short, job.batch_id
-    )
+    format!("{}: {}", job.short, upstream::gone_msg(&job.batch))
 }
 
 /// Server poller: unfetched jobs as (short id, created_at ms).
@@ -368,7 +319,7 @@ pub(crate) fn unfetched(data_dir: &Path) -> Result<Vec<(String, u64)>> {
     return Ok(jobs
         .pending()?
         .into_iter()
-        .map(|j| (j.short, j.created_at))
+        .map(|j| (j.short, j.batch.submitted_at))
         .collect());
 }
 
@@ -383,7 +334,7 @@ pub(crate) fn pending_created_at(data_dir: &Path, short: &str) -> Result<Option<
     if !jobs.pending_rec(short).exists() || jobs.results(short).exists() {
         return Ok(None);
     }
-    return Ok(Some(jobs.load(short)?.created_at));
+    return Ok(Some(jobs.load(short)?.batch.submitted_at));
 }
 
 /// Server poller: one check of job `short`. Some(created_at) = still running,
@@ -400,7 +351,7 @@ pub(crate) async fn poll_once(
     };
     let key = |n: Option<&str>| config.key_for(n).map(str::to_string);
     let checked = match check(&key, provider, &jobs, &mut job).await {
-        Err(e) if e.downcast_ref::<WrongKey>().is_some() => {
+        Err(e) if e.downcast_ref::<upstream::WrongKey>().is_some() => {
             // Retrying with the same key can't help: stop polling it.
             log::warn!("llmjob {short}: {e:#}; not polling it");
             return Ok(None);
@@ -419,7 +370,7 @@ pub(crate) async fn poll_once(
         }
         Check::Pending(progress) => {
             log::info!("{progress}");
-            return Ok(Some(job.created_at));
+            return Ok(Some(job.batch.submitted_at));
         }
         Check::Gone => {
             log::warn!("{}", gone_msg(&job));
@@ -484,7 +435,7 @@ fn write_results(jobs: &Jobs, mut job: Job, v: &Value, out: Option<&Path>) -> Re
     let mut seen = std::collections::HashSet::new();
     for (id, r) in &replies {
         let Some(name) = (0..job.names.len())
-            .find(|&i| custom_id(i) == *id)
+            .find(|&i| upstream::custom_id(i) == *id)
             .map(|i| &job.names[i])
         else {
             log::warn!("ignoring result for unknown request {id:?}");
@@ -507,10 +458,6 @@ fn write_results(jobs: &Jobs, mut job: Job, v: &Value, out: Option<&Path>) -> Re
         job.names.len() - failed
     );
     return Ok(if failed > 0 { 1 } else { 0 });
-}
-
-fn custom_id(i: usize) -> String {
-    format!("r{i}")
 }
 
 fn set_status(jobs: &Jobs, job: &mut Job, status: &str) -> Result<()> {
@@ -558,7 +505,7 @@ fn with_newline(s: &str) -> String {
 pub fn ls(ctx: &Ctx) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
     for j in jobs.all()? {
-        let age = now_ms().saturating_sub(j.created_at) / 60_000;
+        let age = now_ms().saturating_sub(j.batch.submitted_at) / 60_000;
         let age = match age {
             m if m < 60 => format!("{m}m"),
             m if m < 48 * 60 => format!("{}h", m / 60),
@@ -631,19 +578,13 @@ pub async fn rm(ctx: &Ctx, qs: &[String], all: bool, force: bool) -> Result<i32>
 async fn rm_one(ctx: &Ctx, jobs: &Jobs, job: &Job, force: bool) -> Result<Removed> {
     let cached = jobs.results(&job.short);
     if !cached.exists() {
-        let key = ctx.key(job.key_name.as_deref())?;
-        verify_key(job, key)?;
-        match ctx.provider.batch_raw(key, &job.batch_id).await? {
-            None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
-                return Ok(Removed::Running);
-            }
+        let key = ctx.key(job.batch.key_name.as_deref())?;
+        match upstream::look(&ctx.provider, &job.batch, key).await? {
+            Look::Submitted | Look::Pending { .. } => return Ok(Removed::Running),
             // Gone upstream: nothing left to lose.
-            None => {}
-            Some(v) => match parse_batch_all(&v) {
-                BatchState::Pending(_) => return Ok(Removed::Running),
-                _ if !force => return Ok(Removed::Unfetched),
-                _ => ctx.provider.delete_batch(key, &job.batch_id).await?,
-            },
+            Look::Gone => {}
+            Look::Done(_) if !force => return Ok(Removed::Unfetched),
+            Look::Done(_) => ctx.provider.delete_batch(key, &job.batch.id).await?,
         }
     }
     jobs.remove(&job.short)?;
@@ -665,11 +606,13 @@ mod tests {
         let jobs = Jobs::open(&d).unwrap();
         let job = |short: &str, at: u64| Job {
             short: short.into(),
-            batch_id: format!("b-{short}"),
+            batch: BatchRef {
+                id: format!("b-{short}"),
+                key_name: None,
+                key_hash: None,
+                submitted_at: at,
+            },
             model: "m:batch".into(),
-            key_name: None,
-            key_hash: None,
-            created_at: at,
             names: vec!["output".into()],
             status: "validating".into(),
         };
@@ -692,7 +635,7 @@ mod tests {
         assert!(jobs.pending().unwrap().is_empty());
         assert!(jobs.done_rec("abd").exists());
         assert_eq!(jobs.all().unwrap().len(), 2);
-        assert_eq!(jobs.find("abc").unwrap().batch_id, "b-abc");
+        assert_eq!(jobs.find("abc").unwrap().batch.id, "b-abc");
         assert_eq!(jobs.find("last").unwrap().short, "abc");
         assert!(jobs.find("ab").is_err());
         assert!(jobs.find("zz").is_err());
@@ -708,11 +651,13 @@ mod tests {
         let jobs = Jobs::open(&d).unwrap();
         let job = Job {
             short: "xyz".into(),
-            batch_id: "b".into(),
+            batch: BatchRef {
+                id: "b".into(),
+                key_name: None,
+                key_hash: None,
+                submitted_at: 0,
+            },
             model: "m".into(),
-            key_name: None,
-            key_hash: None,
-            created_at: 0,
             names: vec!["a.txt".into(), "b.txt".into(), "c.txt".into()],
             status: "in_progress".into(),
         };
@@ -738,30 +683,12 @@ mod tests {
     }
 
     #[test]
-    fn key_hash_guards_upstream_calls() {
-        let mut job = Job {
-            short: "k1".into(),
-            batch_id: "b".into(),
-            model: "m".into(),
-            key_name: None,
-            key_hash: None,
-            created_at: 0,
-            names: vec![],
-            status: "in_progress".into(),
-        };
-        // Old record: any key.
-        assert!(verify_key(&job, "anything").is_ok());
-        job.key_hash = Some(crate::attachments::hash_of("k-right"));
-        assert!(verify_key(&job, "k-right").is_ok());
-        let e = verify_key(&job, "k-wrong").unwrap_err();
-        assert!(e.downcast_ref::<WrongKey>().is_some());
-        // Old records still parse; new ones round-trip the hash.
+    fn reads_old_records() {
         let old: Job = serde_json::from_str(
-            r#"{"short":"a","batch_id":"b","model":"m","created_at":0,"names":[],"status":"s"}"#,
+            r#"{"short":"a","batch_id":"b","model":"m","created_at":7,"names":[],"status":"s"}"#,
         )
         .unwrap();
-        assert!(old.key_hash.is_none());
-        let back: Job = serde_json::from_str(&serde_json::to_string(&job).unwrap()).unwrap();
-        assert_eq!(back.key_hash, job.key_hash);
+        assert_eq!((old.batch.id.as_str(), old.batch.submitted_at), ("b", 7));
+        assert!(old.batch.key_hash.is_none());
     }
 }

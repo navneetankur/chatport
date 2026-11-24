@@ -205,22 +205,17 @@ pub struct BatchInfo {
     pub expires_at: Option<u64>,
 }
 
-#[derive(Debug)]
-pub enum BatchPoll {
-    /// Still running.
-    Pending(BatchInfo),
-    Done(BatchReply),
-    /// Unknown id. Also seen for a few seconds right after submit.
-    NotFound,
-}
-
 #[async_trait]
 pub trait Provider: Send + Sync {
     async fn list_models(&self) -> Result<Vec<ModelInfo>>;
     async fn stream_chat(&self, req: ChatRequest) -> Result<BoxStream<'static, Result<ChatEvent>>>;
-    /// Submits `req` as a one-request batch. Returns the batch id.
-    async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)>;
-    async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll>;
+    /// Submits `(custom_id, request)` pairs (same model) as one batch.
+    /// Returns the batch id. See `batch::upstream::submit`.
+    async fn submit_batch(
+        &self,
+        key: &str,
+        reqs: &[(String, ChatRequest)],
+    ) -> Result<(String, BatchInfo)>;
     /// `GET` of a batch as raw JSON; None when unknown (404).
     async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>>;
     /// Removes the stored batch upstream. Fails while it is still running.

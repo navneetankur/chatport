@@ -181,11 +181,15 @@ fn parses_tool_call_fragments() {
     );
 }
 
+fn one_batch(r: &ChatRequest) -> Value {
+    build_multi_batch_body(&[("r0".into(), r.clone())]).unwrap()
+}
+
 #[test]
 fn batch_body_fields_before_requests() {
     let mut r = req("anthropic/claude-x:batch", CachePolicy::Auto);
     r.options = Some(json!({ "only": ["anthropic"], "data_collection": "deny" }));
-    let b = build_batch_body(&r);
+    let b = one_batch(&r);
     let s = serde_json::to_string(&b).unwrap();
     let at = |k: &str| s.find(&format!("\"{k}\"")).unwrap();
     assert!(at("endpoint") < at("requests"));
@@ -199,31 +203,24 @@ fn batch_body_fields_before_requests() {
     assert!(body["messages"][0]["content"][0]["cache_control"].is_object());
     // Only unsupported keys → no provider at all.
     r.options = Some(json!({ "data_collection": "deny" }));
-    assert!(build_batch_body(&r).get("provider").is_none());
+    assert!(one_batch(&r).get("provider").is_none());
 }
 
 #[test]
 fn parse_batch_states() {
-    let p = parse_batch(&json!({ "status": "in_progress", "results": null })).unwrap();
-    assert!(matches!(p, BatchPoll::Pending(i) if i.status == "in_progress"));
-    let p = parse_batch(
-        &json!({ "status": "validating", "provider": "Google AI Studio", "expires_at": 9 }),
-    )
-    .unwrap();
-    assert!(matches!(p, BatchPoll::Pending(i)
-        if i.provider.as_deref() == Some("Google AI Studio") && i.expires_at == Some(9)));
-    let p = parse_batch(&json!({ "status": "completed", "results": null })).unwrap();
-    assert!(matches!(p, BatchPoll::Pending(i) if i.status == "finalizing"));
-    let p = parse_batch(&json!({ "status": "expired", "error": { "message": "late" } })).unwrap();
-    assert!(matches!(p, BatchPoll::Done(r) if r.error.as_deref() == Some("batch expired: late")));
-    let p = parse_batch(&json!({ "status": "completed", "results": [
-        { "custom_id": "r1", "response": null, "error": { "message": "too long" } }
+    assert!(parse_batch(&json!({ "status": "in_progress", "results": null })).is_none());
+    // Completed but results not attached yet: still finalizing.
+    assert!(parse_batch(&json!({ "status": "completed", "results": null })).is_none());
+    let r = parse_batch(&json!({ "status": "expired", "error": { "message": "late" } })).unwrap();
+    assert_eq!(r.error.as_deref(), Some("batch expired: late"));
+    let r = parse_batch(&json!({ "status": "completed", "results": [
+        { "custom_id": "r0", "response": null, "error": { "message": "too long" } }
     ]}))
     .unwrap();
-    assert!(matches!(p, BatchPoll::Done(r) if r.error.as_deref() == Some("too long")));
-    let p = parse_batch(
+    assert_eq!(r.error.as_deref(), Some("too long"));
+    let r = parse_batch(
         &json!({ "status": "completed", "provider": "Anthropic", "results": [
-            { "custom_id": "r1", "error": null, "response": { "status_code": 200, "body": {
+            { "custom_id": "r0", "error": null, "response": { "status_code": 200, "body": {
                 "model": "anthropic/claude-x",
                 "choices": [{ "message": { "content": "hi", "reasoning": "hm",
                     "tool_calls": [{ "function": { "name": "read_file" } }] } }],
@@ -232,13 +229,23 @@ fn parse_batch_states() {
         ], "usage": { "prompt_tokens": 5, "completion_tokens": 2, "cost": 0.01 }}),
     )
     .unwrap();
-    let BatchPoll::Done(r) = p else { panic!() };
     assert_eq!((r.content.as_str(), r.reasoning.as_str()), ("hi", "hm"));
     assert_eq!(r.model.as_deref(), Some("anthropic/claude-x"));
     assert_eq!(r.provider.as_deref(), Some("Anthropic"));
     assert_eq!(r.usage.unwrap().cost, Some(0.01));
     assert_eq!(r.tool_calls, ["read_file"]);
     assert!(r.error.is_none());
+}
+
+#[test]
+fn batch_info_of_pending() {
+    let v = json!({ "status": "validating", "provider": "Google AI Studio", "expires_at": 9 });
+    let BatchState::Pending(i) = parse_batch_all(&v) else {
+        panic!()
+    };
+    assert_eq!(i.status, "validating");
+    assert_eq!(i.provider.as_deref(), Some("Google AI Studio"));
+    assert_eq!(i.expires_at, Some(9));
 }
 
 #[test]

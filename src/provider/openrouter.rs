@@ -40,7 +40,7 @@ pub struct OpenRouter {
 
 impl OpenRouter {
     /// `POST /batches` with a prebuilt body (see `build_multi_batch_body`).
-    pub async fn submit_batch_body(&self, key: &str, body: &Value) -> Result<(String, BatchInfo)> {
+    async fn submit_batch_body(&self, key: &str, body: &Value) -> Result<(String, BatchInfo)> {
         let resp = self
             .http
             .post(format!("{BASE}/batches"))
@@ -173,12 +173,6 @@ fn web_tools() -> [Value; 3] {
 
 /// Batch keeps only these `provider` keys; any other routing preference is a 400.
 const BATCH_PROVIDER_KEYS: [&str; 2] = ["only", "allow_fallbacks"];
-
-/// `POST /batches` body with one request.
-pub fn build_batch_body(req: &ChatRequest) -> Value {
-    return build_multi_batch_body(&[("r1".to_string(), req.clone())])
-        .expect("one request always builds");
-}
 
 /// `POST /batches` body with one request per `(custom_id, request)`. All
 /// requests must use the same model; top-level `provider` comes from the
@@ -349,28 +343,25 @@ fn parse_result(batch: &Value, result: &Value) -> BatchReply {
     };
 }
 
-/// Interprets `GET /batches/{id}` of a one-request batch.
-pub fn parse_batch(v: &Value) -> Result<BatchPoll> {
+/// The reply of a one-request batch, from `GET /batches/{id}`. None while it
+/// is still running or finalizing. A failed/expired batch → reply with error.
+pub fn parse_batch(v: &Value) -> Option<BatchReply> {
     match parse_batch_all(v) {
-        BatchState::Pending(info) => return Ok(BatchPoll::Pending(info)),
+        BatchState::Pending(_) => return None,
         BatchState::Failed(e) => {
-            return Ok(BatchPoll::Done(BatchReply {
+            return Some(BatchReply {
                 error: Some(e),
                 ..Default::default()
-            }));
+            });
         }
         BatchState::Done { replies, usage } => {
-            // Cost lives at batch level (docs); logged until verified live.
-            log::info!("batch {} usage: {}", v["id"], v["usage"]);
-            let Some((_, mut r)) = replies.into_iter().next() else {
-                return Ok(BatchPoll::Pending(batch_info(v, "finalizing")));
-            };
+            let (_, mut r) = replies.into_iter().next()?;
             // An errored request has no usage of its own: show the batch's.
             r.usage = match r.error {
                 Some(_) => usage,
                 None => merge_batch_cost(r.usage, usage),
             };
-            return Ok(BatchPoll::Done(r));
+            return Some(r);
         }
     }
 }
@@ -593,17 +584,13 @@ impl Provider for OpenRouter {
         Ok(UnboundedReceiverStream::new(rx).boxed())
     }
 
-    async fn submit_batch(&self, req: &ChatRequest) -> Result<(String, BatchInfo)> {
-        return self
-            .submit_batch_body(&req.key, &build_batch_body(req))
-            .await;
-    }
-
-    async fn poll_batch(&self, key: &str, id: &str) -> Result<BatchPoll> {
-        match self.batch_raw(key, id).await? {
-            None => Ok(BatchPoll::NotFound),
-            Some(v) => parse_batch(&v),
-        }
+    async fn submit_batch(
+        &self,
+        key: &str,
+        reqs: &[(String, ChatRequest)],
+    ) -> Result<(String, BatchInfo)> {
+        let body = build_multi_batch_body(reqs)?;
+        return self.submit_batch_body(key, &body).await;
     }
 
     async fn batch_raw(&self, key: &str, id: &str) -> Result<Option<Value>> {

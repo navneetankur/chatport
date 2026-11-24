@@ -2,7 +2,6 @@
 
 ## browser click-through (only curl/typecheck-tested so far)
 - settings panel (5), attachments + stop (6)
-- batch UI incl. provider + expiry in the pending row
 - file tools UI; web tools UI
 - chat groups; draft chat / recent models / header editing
 - attachment picker, attachment viewer, "+" menu

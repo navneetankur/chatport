@@ -562,7 +562,7 @@ fn no_pending_batch(meta: &Meta) -> R<()> {
     match &meta.pending_batch {
         Some(b) => Err(conflict(&format!(
             "batch {} is still pending; refresh or forget it first",
-            b.id
+            b.batch.id
         ))),
         None => Ok(()),
     }

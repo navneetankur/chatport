@@ -15,13 +15,19 @@
 //! (`POST api/llmjob/rescan` does a scan by hand). Same gaps, by job age.
 //! A finished job is cached for `llmjob get`; nothing is written elsewhere.
 //!
+//! The upstream half (record, submit, one look, key guard) is shared with
+//! llmjob in `upstream`; this file is the conversation side.
+//!
 //! The poller sleeps until the earliest due check; `schedule`/`unschedule`
 //! wake it (`AppState.batch_wake`) so it re-reads the earliest time. With
 //! nothing pending it sleeps until the next submit.
 
+pub mod upstream;
+
 use crate::AppState;
 use crate::api::{R, St, bad, context, ev, load_meta, record_model, save_reply};
-use crate::provider::{BatchInfo, BatchPoll, BatchReply, ChatRequest};
+use crate::provider::openrouter::parse_batch;
+use crate::provider::{BatchInfo, BatchReply, ChatRequest};
 use crate::store::{Message, Meta, PendingBatch, now_ms};
 use crate::tree;
 use anyhow::{Result, anyhow};
@@ -36,9 +42,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use upstream::{Look, WrongKey};
 
-/// A fresh batch can 404 for a few seconds after submit.
-const VISIBLE_AFTER: Duration = Duration::from_secs(120);
 /// First automatic check after submit.
 const FIRST_GAP: Duration = Duration::from_secs(300);
 
@@ -51,10 +56,6 @@ pub type Polls = Mutex<HashMap<String, Instant>>;
 /// Shared by everything that saves or rewrites a pending batch, so a reply is
 /// saved once even when ⟳ and the poller finish the same batch together.
 pub type Lock = tokio::sync::Mutex<()>;
-
-fn age_of(p: &PendingBatch) -> Duration {
-    Duration::from_millis(now_ms().saturating_sub(p.submitted_at))
-}
 
 /// Gap until the next check of a batch this old: doubling from 5 min, capped.
 fn next_gap(age: Duration, cap: Duration) -> Duration {
@@ -108,13 +109,12 @@ pub fn submit(
                 web_tools: false,
                 session_id: meta.id.clone(),
             };
-            let (id, info) = s.provider.submit_batch(&req).await?;
+            let (batch, info) =
+                upstream::submit(s.provider.as_ref(), meta.key_name.clone(), vec![req]).await?;
             let pending = PendingBatch {
-                id,
+                batch,
                 user_id: user.id.clone(),
                 model: meta.model.clone(),
-                key_name: meta.key_name.clone(),
-                submitted_at: now_ms(),
                 info,
             };
             let _g = s.batch_lock.lock().await;
@@ -130,7 +130,7 @@ pub fn submit(
         };
         match submitted.await {
             Ok(p) => {
-                log::info!("{conv_id}: waiting on batch {}", p.id);
+                log::info!("{conv_id}: waiting on batch {}", p.batch.id);
                 schedule(
                     &s,
                     &conv_id,
@@ -186,38 +186,47 @@ pub enum Refreshed {
 
 /// Checks the pending batch of `conv_id` once. Finished (incl. failed, expired,
 /// or gone upstream) → reply appended, leaf set, pending cleared, upstream
-/// copy deleted in the background.
+/// copy deleted in the background. A key other than the submit key is a
+/// `WrongKey` error and changes nothing.
 pub async fn refresh(s: &Arc<AppState>, conv_id: &str) -> Result<Refreshed> {
     let Some(p) = s.store.meta(conv_id)?.and_then(|m| m.pending_batch) else {
         return Ok(Refreshed::None);
     };
-    let key = s.config.key_for(p.key_name.as_deref())?.to_string();
-    let (reply, delete_upstream) = match s.provider.poll_batch(&key, &p.id).await? {
-        BatchPoll::Pending(info) => return update_info(s, conv_id, p, info).await,
-        BatchPoll::NotFound if age_of(&p) < VISIBLE_AFTER => {
+    let key = s.config.key_for(p.batch.key_name.as_deref())?.to_string();
+    let (reply, delete_upstream) = match upstream::look(s.provider.as_ref(), &p.batch, &key).await?
+    {
+        Look::Pending { info, .. } => return update_info(s, conv_id, p, info).await,
+        Look::Submitted => {
             let info = BatchInfo {
                 status: "submitted".into(),
                 ..p.info.clone()
             };
             return Ok(Refreshed::Pending(PendingBatch { info, ..p }));
         }
-        BatchPoll::NotFound => {
+        Look::Gone => {
             let r = BatchReply {
-                error: Some(format!(
-                    "batch {} not found upstream (deleted, or older than 30 days)",
-                    p.id
-                )),
+                error: Some(upstream::gone_msg(&p.batch)),
                 ..Default::default()
             };
             (r, false)
         }
-        BatchPoll::Done(r) => (r, true),
+        Look::Done(v) => match parse_batch(&v) {
+            Some(r) => (r, true),
+            None => {
+                // Completed, results not attached yet.
+                let info = BatchInfo {
+                    status: "finalizing".into(),
+                    ..p.info.clone()
+                };
+                return update_info(s, conv_id, p, info).await;
+            }
+        },
     };
     let _g = s.batch_lock.lock().await;
     let Some(mut meta) = s.store.meta(conv_id)? else {
         return Ok(Refreshed::None);
     };
-    if meta.pending_batch.as_ref().map(|b| &b.id) != Some(&p.id) {
+    if meta.pending_batch.as_ref().map(|b| &b.batch.id) != Some(&p.batch.id) {
         // Someone else saved it (⟳ racing the poller) or it was forgotten.
         return Ok(Refreshed::None);
     }
@@ -228,14 +237,10 @@ pub async fn refresh(s: &Arc<AppState>, conv_id: &str) -> Result<Refreshed> {
     meta.updated_at = now_ms();
     s.store.put_meta(&meta)?;
     unschedule(s, conv_id);
-    log::info!("{conv_id}: batch {} done, reply {}", p.id, asst.id);
+    log::info!("{conv_id}: batch {} done, reply {}", p.batch.id, asst.id);
     if delete_upstream {
         let s = s.clone();
-        tokio::spawn(async move {
-            if let Err(e) = s.provider.delete_batch(&key, &p.id).await {
-                log::warn!("deleting batch {}: {e:#}", p.id);
-            }
-        });
+        tokio::spawn(async move { upstream::delete(s.provider.as_ref(), &p.batch, &key).await });
     }
     return Ok(Refreshed::Saved(asst));
 }
@@ -250,7 +255,10 @@ async fn update_info(
     if info != p.info {
         let _g = s.batch_lock.lock().await;
         if let Some(mut meta) = s.store.meta(conv_id)?
-            && let Some(b) = meta.pending_batch.as_mut().filter(|b| b.id == p.id)
+            && let Some(b) = meta
+                .pending_batch
+                .as_mut()
+                .filter(|b| b.batch.id == p.batch.id)
         {
             b.info = info.clone();
             s.store.put_meta(&meta)?;
@@ -287,12 +295,15 @@ pub async fn forget_handler(State(s): St, Path(id): Path<String>) -> R<Json<Valu
         p
     };
     unschedule(&s, &id);
-    let deleted = match s.config.key_for(p.key_name.as_deref()) {
-        Ok(key) => s.provider.delete_batch(key, &p.id).await,
+    let deleted = match s.config.key_for(p.batch.key_name.as_deref()) {
+        Ok(key) => s.provider.delete_batch(key, &p.batch.id).await,
         Err(e) => Err(e),
     };
     if let Err(e) = &deleted {
-        log::warn!("{id}: forgot batch {} without deleting it: {e:#}", p.id);
+        log::warn!(
+            "{id}: forgot batch {} without deleting it: {e:#}",
+            p.batch.id
+        );
     }
     Ok(Json(json!({ "upstream_deleted": deleted.is_ok() })))
 }
@@ -439,12 +450,18 @@ async fn poll_due(s: &Arc<AppState>, cap: Duration) {
         }
         match refresh(s, &id).await {
             Ok(Refreshed::Pending(p)) => {
-                let gap = next_gap(age_of(&p), cap);
+                let gap = next_gap(p.batch.age(), cap);
                 log::info!("auto-poll {id}: {}, next check in {gap:?}", p.info.status);
                 schedule(s, &id, gap);
             }
             Ok(Refreshed::Saved(_)) => log::info!("auto-poll {id}: reply saved"),
             Ok(Refreshed::None) => unschedule(s, &id),
+            Err(e) if e.downcast_ref::<WrongKey>().is_some() => {
+                // Same key next time: stop. A restart with the right key
+                // rescans; ⟳ shows the error.
+                log::warn!("auto-poll {id}: {e:#}; not polling it");
+                unschedule(s, &id);
+            }
             Err(e) => {
                 // Includes a deleted conversation's folder: retry later anyway;
                 // the next refresh sees no meta and unschedules.

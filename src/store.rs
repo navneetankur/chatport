@@ -68,15 +68,13 @@ pub struct Meta {
 /// A submitted batch whose reply is not in `messages.jsonl` yet.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PendingBatch {
-    pub id: String,
+    /// id, key name + hash, submitted_at (flat in meta.json, as before).
+    #[serde(flatten)]
+    pub batch: crate::batch::upstream::BatchRef,
     /// User message the reply answers.
     pub user_id: String,
     /// Model requested (the `:batch` id).
     pub model: String,
-    /// Key the batch was billed to; polling must use the same one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_name: Option<String>,
-    pub submitted_at: u64,
     /// Last known status, provider and deadline (from submit or the last refresh).
     #[serde(default, flatten)]
     pub info: BatchInfo,
