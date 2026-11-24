@@ -56,5 +56,6 @@
   submit, one look, key guard, delete were written twice and the key guard
   would have been a third copy. Split at "what happens to a finished batch"
   (conversation tree under `batch_lock` vs job files). Record fields unified
-  (`id`, `submitted_at`); llmjob's old names read via serde aliases.
+  (`id`, `submitted_at`); no aliases for llmjob's old names: no job records
+  existed at the switch.
   `PendingBatch` JSON unchanged (flatten), so the frontend is untouched.

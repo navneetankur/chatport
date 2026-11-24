@@ -16,10 +16,9 @@ use std::time::Duration;
 pub const VISIBLE_AFTER: Duration = Duration::from_secs(120);
 
 /// What is kept of a submitted batch. Flattened into chatport's
-/// `PendingBatch` and llmjob's `Job`; the aliases read llmjob's old names.
+/// `PendingBatch` and llmjob's `Job`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct BatchRef {
-    #[serde(alias = "batch_id")]
     pub id: String,
     /// Key name the batch was billed to (None = default key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,7 +29,6 @@ pub struct BatchRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_hash: Option<String>,
     /// Unix ms.
-    #[serde(alias = "created_at")]
     pub submitted_at: u64,
 }
 
@@ -159,12 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_old_llmjob_names() {
-        let b: BatchRef =
-            serde_json::from_str(r#"{"batch_id":"x","created_at":5,"key_name":"w"}"#).unwrap();
-        assert_eq!((b.id.as_str(), b.submitted_at), ("x", 5));
-        assert_eq!(b.key_name.as_deref(), Some("w"));
-        assert!(b.key_hash.is_none());
+    fn round_trips() {
         let b = bref(Some("h".into()));
         let back: BatchRef = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
         assert_eq!(back, b);

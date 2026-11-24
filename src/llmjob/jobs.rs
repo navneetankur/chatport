@@ -33,7 +33,7 @@ pub const EXIT_PENDING: i32 = 2;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Job {
     pub short: String,
-    /// id, key name + hash, submitted_at (old records: batch_id, created_at).
+    /// id, key name + hash, submitted_at.
     #[serde(flatten)]
     pub batch: BatchRef,
     pub model: String,
@@ -680,15 +680,5 @@ mod tests {
         assert!(!d.join("evil").exists());
         assert_eq!(jobs.find("xyz").unwrap().status, "completed");
         std::fs::remove_dir_all(&d).unwrap();
-    }
-
-    #[test]
-    fn reads_old_records() {
-        let old: Job = serde_json::from_str(
-            r#"{"short":"a","batch_id":"b","model":"m","created_at":7,"names":[],"status":"s"}"#,
-        )
-        .unwrap();
-        assert_eq!((old.batch.id.as_str(), old.batch.submitted_at), ("b", 7));
-        assert!(old.batch.key_hash.is_none());
     }
 }
