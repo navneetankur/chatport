@@ -7,7 +7,7 @@
   `Gone`), `delete`, `gone_msg`. `look` first compares the key with
   `key_hash` (sha256 of the submit key): mismatch → `WrongKey`, no request.
   Reason: upstream answers 404 for a batch unknown to the key's account, so
-  a wrong key looked like "gone". Records without a hash take any key. Each
+  a wrong key looked like "gone". `key_hash` is required. Each
   side keeps what happens to a finished batch.
 
 - model id ending `:batch` → send/regenerate submit a one-request batch

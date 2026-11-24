@@ -173,14 +173,23 @@ fn adopt_moves_chat_between_stores() {
 
 #[test]
 fn pending_batch_json_stays_flat() {
-    let old = r#"{"id":"b1","user_id":"u","model":"m:batch","key_name":"w",
-        "submitted_at":5,"status":"in_progress","provider":"P"}"#;
-    let p: PendingBatch = serde_json::from_str(old).unwrap();
+    let text = r#"{"id":"b1","user_id":"u","model":"m:batch","key_name":"w",
+        "key_hash":"h","submitted_at":5,"status":"in_progress","provider":"P"}"#;
+    let p: PendingBatch = serde_json::from_str(text).unwrap();
     assert_eq!((p.batch.id.as_str(), p.batch.submitted_at), ("b1", 5));
     assert_eq!(p.batch.key_name.as_deref(), Some("w"));
     assert_eq!(p.info.status, "in_progress");
     let v = serde_json::to_value(&p).unwrap();
-    for k in ["id", "user_id", "model", "key_name", "submitted_at", "status", "provider"] {
+    for k in [
+        "id",
+        "user_id",
+        "model",
+        "key_name",
+        "key_hash",
+        "submitted_at",
+        "status",
+        "provider",
+    ] {
         assert!(v.get(k).is_some(), "{k} missing in {v}");
     }
 }

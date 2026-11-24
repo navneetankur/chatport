@@ -609,7 +609,7 @@ mod tests {
             batch: BatchRef {
                 id: format!("b-{short}"),
                 key_name: None,
-                key_hash: None,
+                key_hash: String::new(),
                 submitted_at: at,
             },
             model: "m:batch".into(),
@@ -654,7 +654,7 @@ mod tests {
             batch: BatchRef {
                 id: "b".into(),
                 key_name: None,
-                key_hash: None,
+                key_hash: String::new(),
                 submitted_at: 0,
             },
             model: "m".into(),

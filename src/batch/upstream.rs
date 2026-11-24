@@ -25,9 +25,8 @@ pub struct BatchRef {
     pub key_name: Option<String>,
     /// sha256 hex of the key it was submitted with. Upstream answers 404, not
     /// 401, for a batch another account owns, so a wrong key would look like
-    /// "gone". None in records from before this field (any key goes).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key_hash: Option<String>,
+    /// "gone".
+    pub key_hash: String,
     /// Unix ms.
     pub submitted_at: u64,
 }
@@ -39,9 +38,7 @@ impl BatchRef {
 
     /// Refuses a key other than the submit key (`WrongKey`).
     pub fn verify_key(&self, key: &str) -> Result<()> {
-        if let Some(h) = &self.key_hash
-            && *h != hash_of(key)
-        {
+        if self.key_hash != hash_of(key) {
             return Err(WrongKey.into());
         }
         return Ok(());
@@ -84,7 +81,7 @@ pub async fn submit(
     let b = BatchRef {
         id,
         key_name,
-        key_hash: Some(hash_of(&key)),
+        key_hash: hash_of(&key),
         submitted_at: now_ms(),
     };
     return Ok((b, info));
@@ -137,7 +134,7 @@ pub fn gone_msg(b: &BatchRef) -> String {
 mod tests {
     use super::*;
 
-    fn bref(key_hash: Option<String>) -> BatchRef {
+    fn bref(key_hash: String) -> BatchRef {
         BatchRef {
             id: "b".into(),
             key_name: None,
@@ -148,9 +145,7 @@ mod tests {
 
     #[test]
     fn key_hash_guards_upstream_calls() {
-        // Old record: any key.
-        assert!(bref(None).verify_key("anything").is_ok());
-        let b = bref(Some(hash_of("k-right")));
+        let b = bref(hash_of("k-right"));
         assert!(b.verify_key("k-right").is_ok());
         let e = b.verify_key("k-wrong").unwrap_err();
         assert!(e.downcast_ref::<WrongKey>().is_some());
@@ -158,7 +153,7 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        let b = bref(Some("h".into()));
+        let b = bref("h".into());
         let back: BatchRef = serde_json::from_str(&serde_json::to_string(&b).unwrap()).unwrap();
         assert_eq!(back, b);
     }
