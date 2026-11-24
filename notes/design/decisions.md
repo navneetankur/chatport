@@ -46,3 +46,9 @@
   quietly losing to it is the surprise. One rule ("the flag wins") over
   "wins unless `-p`". `OPENROUTER_API_KEY` stays below key names: nothing on
   the command line sets it.
+- llmjob job records carry the submit key's full sha256 (`key_hash`), checked
+  before upstream calls. Upstream answers 404 for a batch unknown to the
+  key's account, so a wrong key looked like "gone": `rm` deleted the record,
+  the poller gave up. A hash over a "sent with --keyfile" flag: also catches a
+  changed config key or the wrong file. Full hash: the key is random, so the
+  hash reveals nothing usable; truncating would only save bytes.
