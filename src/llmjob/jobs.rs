@@ -38,6 +38,11 @@ pub struct Job {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_name: Option<String>,
+    /// sha256 hex of the key the batch was sent with: upstream answers 404,
+    /// not 401, for a batch another account owns, which would look like
+    /// "gone". None in records from before this field (any key goes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_hash: Option<String>,
     pub created_at: u64,
     /// Name of each request (input file name), in submit order. Request i
     /// is sent as custom_id `r<i>`: providers restrict custom_id characters.
@@ -49,6 +54,29 @@ pub struct Job {
 pub struct Jobs {
     pending: PathBuf,
     done: PathBuf,
+}
+
+/// The key about to be used is not the one the job was sent with.
+#[derive(Debug)]
+pub struct WrongKey;
+
+impl std::fmt::Display for WrongKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("sent with another key; pass the --keyfile (or config key) it was sent with")
+    }
+}
+
+impl std::error::Error for WrongKey {}
+
+/// Refuses a key other than the job's (`WrongKey`). Records without a hash
+/// take any key.
+fn verify_key(job: &Job, key: &str) -> Result<()> {
+    if let Some(h) = &job.key_hash
+        && *h != crate::attachments::hash_of(key)
+    {
+        return Err(WrongKey.into());
+    }
+    return Ok(());
 }
 
 /// Job ids (file stems) in `dir`: `<short>.json`, skipping results and tmp files.
@@ -233,6 +261,7 @@ pub async fn submit(ctx: &Ctx, reqs: Vec<(String, ChatRequest)>) -> Result<i32> 
         batch_id,
         model,
         key_name: ctx.key_name.clone(),
+        key_hash: Some(crate::attachments::hash_of(&key)),
         created_at: now_ms(),
         names,
         status: info.status,
@@ -268,6 +297,7 @@ async fn check(
         ));
     }
     let key = key(job.key_name.as_deref())?;
+    verify_key(job, &key)?;
     let (status, progress) = match provider.batch_raw(&key, &job.batch_id).await? {
         Some(v) => match parse_batch_all(&v) {
             BatchState::Pending(info) => {
@@ -369,7 +399,15 @@ pub(crate) async fn poll_once(
         return Ok(None); // removed with `llmjob rm`
     };
     let key = |n: Option<&str>| config.key_for(n).map(str::to_string);
-    match check(&key, provider, &jobs, &mut job).await? {
+    let checked = match check(&key, provider, &jobs, &mut job).await {
+        Err(e) if e.downcast_ref::<WrongKey>().is_some() => {
+            // Retrying with the same key can't help: stop polling it.
+            log::warn!("llmjob {short}: {e:#}; not polling it");
+            return Ok(None);
+        }
+        r => r?,
+    };
+    match checked {
         Check::Done(v) => {
             let state = match parse_batch_all(&v) {
                 BatchState::Failed(_) => "failed",
@@ -594,6 +632,7 @@ async fn rm_one(ctx: &Ctx, jobs: &Jobs, job: &Job, force: bool) -> Result<Remove
     let cached = jobs.results(&job.short);
     if !cached.exists() {
         let key = ctx.key(job.key_name.as_deref())?;
+        verify_key(job, key)?;
         match ctx.provider.batch_raw(key, &job.batch_id).await? {
             None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
                 return Ok(Removed::Running);
@@ -629,6 +668,7 @@ mod tests {
             batch_id: format!("b-{short}"),
             model: "m:batch".into(),
             key_name: None,
+            key_hash: None,
             created_at: at,
             names: vec!["output".into()],
             status: "validating".into(),
@@ -671,6 +711,7 @@ mod tests {
             batch_id: "b".into(),
             model: "m".into(),
             key_name: None,
+            key_hash: None,
             created_at: 0,
             names: vec!["a.txt".into(), "b.txt".into(), "c.txt".into()],
             status: "in_progress".into(),
@@ -694,5 +735,33 @@ mod tests {
         assert!(!d.join("evil").exists());
         assert_eq!(jobs.find("xyz").unwrap().status, "completed");
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn key_hash_guards_upstream_calls() {
+        let mut job = Job {
+            short: "k1".into(),
+            batch_id: "b".into(),
+            model: "m".into(),
+            key_name: None,
+            key_hash: None,
+            created_at: 0,
+            names: vec![],
+            status: "in_progress".into(),
+        };
+        // Old record: any key.
+        assert!(verify_key(&job, "anything").is_ok());
+        job.key_hash = Some(crate::attachments::hash_of("k-right"));
+        assert!(verify_key(&job, "k-right").is_ok());
+        let e = verify_key(&job, "k-wrong").unwrap_err();
+        assert!(e.downcast_ref::<WrongKey>().is_some());
+        // Old records still parse; new ones round-trip the hash.
+        let old: Job = serde_json::from_str(
+            r#"{"short":"a","batch_id":"b","model":"m","created_at":0,"names":[],"status":"s"}"#,
+        )
+        .unwrap();
+        assert!(old.key_hash.is_none());
+        let back: Job = serde_json::from_str(&serde_json::to_string(&job).unwrap()).unwrap();
+        assert_eq!(back.key_hash, job.key_hash);
     }
 }
