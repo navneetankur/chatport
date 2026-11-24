@@ -41,3 +41,8 @@
   an explicit `llmjob notify` over HTTP (dropped); polling the folder
   (rejected: idle wake-ups). CLI and server share a machine, so inotify sees
   the writes. Server down → `llmjob get` / `get --all` by hand.
+- llmjob `--keyfile` wins over profile/stored key names. A `[profile.default]`
+  `key` applies with nothing on the command line saying so; an explicit flag
+  quietly losing to it is the surprise. One rule ("the flag wins") over
+  "wins unless `-p`". `OPENROUTER_API_KEY` stays below key names: nothing on
+  the command line sets it.

@@ -10,6 +10,12 @@
 - profiles `[profile.NAME]`: model, effort, key, system, msg, headers, provider.
   `-p NAME`; `default` used when present. Relative paths against the config
   file's folder. `--model` / `--effort` override.
+- key: `--keyfile` replaces the default key's value (as in the server) and wins
+  over every key name: profile `key` (cleared at resolve, so nothing new stores
+  a name) and names stored in conversations/jobs (`Ctx::key`). Without it:
+  profile/stored name, else the default key (`OPENROUTER_API_KEY` replaces that
+  one's value). A job sent with `--keyfile` stores no name: `get`/`rm` need the
+  same `--keyfile`; the server poller uses its own default key.
 - `run`: streams to stdout; stored as a chatport conversation. Unsaved → one-chat
   scratch store `data_dir/llmjob/scratch/` (replaced by the next unsaved run);
   `--save` / `keep` → `conversations/llmjob/` (Store::adopt). Shown id = last 6

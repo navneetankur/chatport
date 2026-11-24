@@ -56,7 +56,8 @@ options:
                       rm: every job (running ones are always skipped)
       --force         rm: also jobs finished upstream but never fetched
       --config PATH   default ~/.config/chatport/config.toml
-      --keyfile PATH  key for the default key name (else OPENROUTER_API_KEY, config)
+      --keyfile PATH  the key for everything, over profile/stored key names
+                      (else OPENROUTER_API_KEY, config)
 
 Parts of a message (profile msg files, -m files, the --dir file, TEXT) are
 joined by a blank line; empty ones are skipped. A new conversation gets the
@@ -261,8 +262,25 @@ pub struct Ctx {
     config_dir: PathBuf,
     pub data_dir: PathBuf,
     pub provider: OpenRouter,
-    /// Key name of the resolved profile (None = default key).
+    /// Key name of the resolved profile (None = default key; always None
+    /// with `--keyfile`).
     pub key_name: Option<String>,
+    /// `--keyfile` given: its key is used whatever key name a profile or a
+    /// stored conversation/job names.
+    keyfile: bool,
+}
+
+impl Ctx {
+    /// Key for a stored key name; `--keyfile` wins over any name.
+    pub fn key(&self, name: Option<&str>) -> Result<&str> {
+        key_of(&self.config, self.keyfile, name)
+    }
+}
+
+/// `--keyfile` replaced the default key's value, so with it every name
+/// resolves to the default key.
+fn key_of<'a>(cfg: &'a Config, keyfile: bool, name: Option<&str>) -> Result<&'a str> {
+    cfg.key_for(if keyfile { None } else { name })
 }
 
 /// Entry point of the `llmjob` binary. Returns the exit code.
@@ -305,12 +323,18 @@ async fn dispatch(a: Args) -> Result<i32> {
         None => std::env::var("OPENROUTER_API_KEY").ok(),
     };
     cfg.resolve_keys(override_key)?;
-    let profile = resolve_profile(&cfg, a.profile.as_deref())?;
+    let mut profile = resolve_profile(&cfg, a.profile.as_deref())?;
+    let keyfile = a.keyfile.is_some();
+    if keyfile {
+        // Nothing stores a key name the file's key was not used under.
+        profile.key = None;
+    }
     let ctx = Ctx {
         config_dir: path.parent().map(Path::to_path_buf).unwrap_or_default(),
         data_dir: config::expand_tilde(&cfg.data_dir),
         provider: OpenRouter::new(cfg.key_for(None)?.to_string())?,
         key_name: profile.key.clone(),
+        keyfile,
         config: cfg,
     };
     return match a.cmd {
@@ -543,7 +567,7 @@ async fn run(ctx: &Ctx, a: &Args, p: &Profile) -> Result<i32> {
 
     let msgs = store.messages(&meta.id)?;
     let req = ChatRequest {
-        key: ctx.config.key_for(meta.key_name.as_deref())?.to_string(),
+        key: ctx.key(meta.key_name.as_deref())?.to_string(),
         model: meta.model.clone(),
         system: meta.system.clone(),
         messages: context(&tree::path(&msgs, &user.id), false),
@@ -646,7 +670,7 @@ async fn batch(ctx: &Ctx, a: &Args, p: &Profile) -> Result<i32> {
             })
             .collect::<Result<_>>()?,
     };
-    let key = ctx.config.key_for(ctx.key_name.as_deref())?.to_string();
+    let key = ctx.key(ctx.key_name.as_deref())?.to_string();
     let provider = p
         .provider
         .clone()

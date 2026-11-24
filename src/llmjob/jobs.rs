@@ -254,8 +254,9 @@ enum Check {
 
 /// Reads the cache, or asks upstream once. A finished batch gets cached and
 /// its upstream copy deleted; a pending one updates the record's status.
+/// `key` is only asked for when upstream is (a cached job needs none).
 async fn check(
-    config: &Config,
+    key: &(dyn Fn(Option<&str>) -> Result<String> + Sync),
     provider: &dyn Provider,
     jobs: &Jobs,
     job: &mut Job,
@@ -266,7 +267,7 @@ async fn check(
             serde_json::from_slice(&b).context("reading cached results")?,
         ));
     }
-    let key = config.key_for(job.key_name.as_deref())?.to_string();
+    let key = key(job.key_name.as_deref())?;
     let (status, progress) = match provider.batch_raw(&key, &job.batch_id).await? {
         Some(v) => match parse_batch_all(&v) {
             BatchState::Pending(info) => {
@@ -309,8 +310,9 @@ pub async fn get(ctx: &Ctx, q: &str, out: Option<&Path>, wait: bool) -> Result<i
             job.names.len()
         );
     }
+    let key = |n: Option<&str>| ctx.key(n).map(str::to_string);
     let v = loop {
-        match check(&ctx.config, &ctx.provider, &jobs, &mut job).await? {
+        match check(&key, &ctx.provider, &jobs, &mut job).await? {
             Check::Done(v) => break v,
             Check::Pending(progress) => eprintln!("{progress}"),
             Check::Gone => bail!("{}", gone_msg(&job)),
@@ -366,7 +368,8 @@ pub(crate) async fn poll_once(
     let Ok(mut job) = jobs.load(short) else {
         return Ok(None); // removed with `llmjob rm`
     };
-    match check(config, provider, &jobs, &mut job).await? {
+    let key = |n: Option<&str>| config.key_for(n).map(str::to_string);
+    match check(&key, provider, &jobs, &mut job).await? {
         Check::Done(v) => {
             let state = match parse_batch_all(&v) {
                 BatchState::Failed(_) => "failed",
@@ -394,7 +397,8 @@ pub async fn get_all(ctx: &Ctx) -> Result<i32> {
     let jobs = Jobs::open(&ctx.data_dir)?;
     let (mut fetched, mut running, mut failed) = (0, 0, 0);
     for mut job in jobs.pending()? {
-        match check(&ctx.config, &ctx.provider, &jobs, &mut job).await {
+        let key = |n: Option<&str>| ctx.key(n).map(str::to_string);
+        match check(&key, &ctx.provider, &jobs, &mut job).await {
             Ok(Check::Done(v)) => {
                 let state = match parse_batch_all(&v) {
                     BatchState::Failed(_) => "failed",
@@ -589,7 +593,7 @@ pub async fn rm(ctx: &Ctx, qs: &[String], all: bool, force: bool) -> Result<i32>
 async fn rm_one(ctx: &Ctx, jobs: &Jobs, job: &Job, force: bool) -> Result<Removed> {
     let cached = jobs.results(&job.short);
     if !cached.exists() {
-        let key = ctx.config.key_for(job.key_name.as_deref())?;
+        let key = ctx.key(job.key_name.as_deref())?;
         match ctx.provider.batch_raw(key, &job.batch_id).await? {
             None if now_ms().saturating_sub(job.created_at) < VISIBLE_AFTER_MS => {
                 return Ok(Removed::Running);

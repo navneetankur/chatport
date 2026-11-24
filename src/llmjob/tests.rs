@@ -138,3 +138,19 @@ fn lookup_by_prefix_suffix_and_last() {
     assert!(convs.scratch.list().unwrap().is_empty());
     std::fs::remove_dir_all(&d).unwrap();
 }
+
+#[test]
+fn keyfile_wins_over_key_names() {
+    let text = "[[keys]]\nname = \"main\"\nkey = \"k-main\"\n[[keys]]\nname = \"work\"\nkey = \"k-work\"\n";
+    let base: Config = toml::from_str(text).unwrap();
+    // No --keyfile: names pick their key, None the default (first).
+    let mut cfg = base.clone();
+    cfg.resolve_keys(None).unwrap();
+    assert_eq!(key_of(&cfg, false, Some("work")).unwrap(), "k-work");
+    assert_eq!(key_of(&cfg, false, None).unwrap(), "k-main");
+    // --keyfile replaces the default key and wins over any name.
+    let mut cfg = base;
+    cfg.resolve_keys(Some("k-file".into())).unwrap();
+    assert_eq!(key_of(&cfg, true, Some("work")).unwrap(), "k-file");
+    assert_eq!(key_of(&cfg, true, None).unwrap(), "k-file");
+}
