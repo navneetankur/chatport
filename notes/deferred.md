@@ -19,4 +19,6 @@
   clearly instead of using the default key, and the server poller would skip
   such jobs. Matters if upstream answers 404 (not 401) for another account's
   batch: today `rm` then treats it as gone and deletes the record, the poller
-  stops polling it. Unknown which upstream does; check before building.
+  stops polling it. Checked: valid key + unknown batch id → 404, bad key →
+  401, so another account's batch almost surely looks like 404 (not tested
+  with a real second account; per-key vs per-account scope unknown).
